@@ -11,9 +11,8 @@
 </div>
 
 *Wenn du nicht weißt, welche Version du herunterladen sollst:*
-* **arm64-v8a:** Die meisten modernen Smartphones (letzte 5-7 Jahre).
-* **armeabi-v7a:** Ältere Handys.
-* **universal:** Wenn du dir unsicher bist, funktioniert diese Version überall (die Datei ist allerdings größer).
+* **arm64-v8a:** Fast sicher diese Version
+* **universal:** Wenn die erste nicht funktioniert
 ---
 
 ### Aber warum?
@@ -41,6 +40,16 @@ Folgende Technologien und Bibliotheken machen Uniwe möglich:
 ![Dart](https://img.shields.io/badge/dart-%230175C2.svg?style=flat-square&logo=dart&logoColor=white) 
 
 `http` `provider` `dynamic_color` `flutter_secure_storage` `enough_mail` `webview_flutter`
+
+---
+
+### Datenschutz and Sicherheit
+
+Uniwe wurde mit besonderem Augenmerk auf Datenschutz und Sicherheit entwickelt.
+
+- **Nur lokale Speicherung:** Deine LSF- und HTW-Anmeldedaten werden sicher verschlüsselt und **ausschließlich** lokal auf deinem Gerät im sicheren Speicher des Systems (Keystore/Keychain) abgelegt (über `flutter_secure_storage`). Deine Passwörter werden niemals an eigene Server gesendet – es gibt keinen zentralisierten Uniwe-Server.
+- **Direkte Verbindungen:** Die App stellt sämtliche Verbindungen zu den HTW LSF- und Webmail-Servern direkt von deinem Gerät aus her.
+- **Open-Source-Transparenz:** Der gesamte Code ist hier öffentlich zugänglich. Du kannst genau überprüfen, wie deine Daten verarbeitet werden, wodurch ausgeschlossen ist, dass verdeckt Daten im Hintergrund gesammelt werden.
 
 ---
 
