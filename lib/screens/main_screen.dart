@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -211,9 +210,9 @@ class _MainScreenState extends State<MainScreen> {
             ),
             label: l10n.get('email'),
           ),
-          NavigationDestination(
-            icon: const Icon(Icons.directions_transit_outlined),
-            selectedIcon: const Icon(Icons.directions_transit),
+          const NavigationDestination(
+            icon: Icon(Icons.directions_transit_outlined),
+            selectedIcon: Icon(Icons.directions_transit),
             label: 'Transport',
           ),
           NavigationDestination(

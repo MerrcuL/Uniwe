@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 class TransportArrival {
   final String lineName;
   final DateTime? when;

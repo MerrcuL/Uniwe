@@ -167,6 +167,7 @@ class _EmailScreenState extends State<EmailScreen> {
       url = 'https://webmail.htw-berlin.de/currentNG/?_task=mail';
     }
 
+    if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final controller = WebViewController()

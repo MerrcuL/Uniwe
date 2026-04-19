@@ -60,6 +60,7 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
 
     final url = 'https://lsf.htw-berlin.de/qisserver/rds?state=verpublish&status=init&vmfile=no&publishid=${widget.publishId}&moduleCall=webInfo&publishConfFile=webInfo&publishSubDir=veranstaltung';
 
+    if (!mounted) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     _controller = WebViewController()
