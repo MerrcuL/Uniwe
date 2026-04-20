@@ -21,7 +21,7 @@
 
 ### But why?
 
-When I enrolled in October 2025, I was surprised to find that a university as large as HTW Berlin **didn't have its own mobile app**. I have no intention of using **Studo**, which is not only full of junk (authenticator, job search, feed... seriously??), but also hides its basic functionality behind a “pro” subscription. Besides, the interface for both Studo and LSF hasn’t changed since 2010 (and that’s not even an exaggeration), so I decided that I could build a decent app for myself (and for you) - one that’s **beautiful, modern, completely free, and open-source**.
+When I enrolled in October 2025, I was surprised to find that a university as large as HTW Berlin **didn't have its own mobile app**. I have no intention of using **Studo**, which is not only full of junk (authenticator, job search, feed... seriously??), but also requires your phone number and hides its basic functionality behind a “pro” subscription. Besides, the interface for both Studo and LSF hasn’t changed since 2010 (and that’s not even an exaggeration), so I decided that I could build a decent app for myself (and for you) - one that’s **beautiful, modern, completely free, and open-source**.
 
 ### Core Features
 - **Timetable:** Automatically fetched from LSF and cleanly presented.
