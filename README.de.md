@@ -10,6 +10,9 @@
   [![Download from latest release](https://img.shields.io/badge/Download-Release-blue?style=for-the-badge&logo=github)](https://github.com/MerrcuL/Uniwe/releases/latest)
 </div>
 
+<p align="center" width="100%">
+<img src="assets/Screenshots/schedule_de.png" width="25%"><img src="assets/Screenshots/mensa_de.jpg" width="25%"><img src="assets/Screenshots/tram_de.jpg" width="25%"></p>
+
 *Wenn du nicht weißt, welche Version du herunterladen sollst:*
 * **arm64-v8a:** Fast sicher diese Version
 * **universal:** Wenn die erste nicht funktioniert
