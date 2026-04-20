@@ -11,7 +11,7 @@
 </div>
 
 <p align="center" width="100%">
-<img src="assets/Screenshots/schedule_en.jpg" width="25%"><img src="assets/Screenshots/mensa_en.jpg" width="25%"><img src="assets/Screenshots/tram_en.jpg" width="25%"></p>
+<img src="assets/Screenshots/schedule_en.jpg" width="33%"><img src="assets/Screenshots/mensa_en.jpg" width="33%"><img src="assets/Screenshots/tram_en.jpg" width="33%"></p>
 
 *If you don't know which version to download:*
 * **arm64-v8a:** Almost certainly this one
