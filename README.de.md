@@ -20,7 +20,7 @@
 
 ### Aber warum?
 
-Als ich mich im Oktober 2025 einschrieb, war ich überrascht, dass eine so große Hochschule wie die HTW Berlin **keine eigene mobile App hatte**. Ich habe nicht die Absicht, **Studo** zu nutzen, das nicht nur voller Schnickschnack ist (Authentifikator, Jobsuche, Feed … im Ernst??), sondern auch seine grundlegenden Funktionen hinter einem „Pro“-Abonnement versteckt. Außerdem hat sich die Benutzeroberfläche sowohl von Studo als auch von LSF seit 2010 nicht verändert (und das ist nicht einmal übertrieben), also beschloss ich, eine anständige App für mich (und für euch) zu entwickeln – eine, die **schön, modern, völlig kostenlos und Open Source** ist.
+Als ich mich im Oktober 2025 einschrieb, war ich überrascht, dass eine so große Hochschule wie die HTW Berlin **keine eigene mobile App hatte**. Ich habe nicht die Absicht, **Studo** zu nutzen, das nicht nur voller Schnickschnack ist (Authentifikator, Jobsuche, Feed … im Ernst??), sondern auch Ihre Telefonnummer erfordert und seine grundlegenden Funktionen hinter einem „Pro“-Abonnement versteckt. Außerdem hat sich die Benutzeroberfläche sowohl von Studo als auch von LSF seit 2010 nicht verändert (und das ist nicht einmal übertrieben), also beschloss ich, eine anständige App für mich (und für euch) zu entwickeln – eine, die **schön, modern, völlig kostenlos und Open Source** ist.
 
 Übersetzt mit DeepL.com (kostenlose Version)
 
