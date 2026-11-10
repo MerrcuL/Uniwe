@@ -4,10 +4,14 @@ import 'package:intl/intl.dart';
 enum LogLevel { info, warning, error, debug }
 
 class LogEntry {
+  static final DateFormat _timeFormatter = DateFormat('HH:mm:ss.SSS');
+
   final DateTime timestamp;
   final LogLevel level;
   final String message;
   final String? details;
+
+  late final String formattedTime = _timeFormatter.format(timestamp);
 
   LogEntry({
     required this.timestamp,
@@ -15,8 +19,6 @@ class LogEntry {
     required this.message,
     this.details,
   });
-
-  String get formattedTime => DateFormat('HH:mm:ss.SSS').format(timestamp);
 }
 
 class LogService extends ChangeNotifier {

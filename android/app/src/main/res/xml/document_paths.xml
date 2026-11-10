@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Downloaded LSF documents, handed to PDF viewers / the share sheet. -->
+<paths>
+    <cache-path name="documents" path="documents/" />
+</paths>

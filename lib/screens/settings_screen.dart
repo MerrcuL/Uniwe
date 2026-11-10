@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
-import '../services/settings_service.dart';
 import '../services/auth_service.dart';
 import '../services/haptic_service.dart';
-import 'login_screen.dart';
-import 'mensa_settings_screen.dart';
+import '../services/log_service.dart';
+import '../services/settings_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/expressive.dart';
 import 'about_screen.dart';
 import 'log_screen.dart';
-import '../services/log_service.dart';
+import 'login_screen.dart';
+import 'mensa_settings_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -17,359 +19,349 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     final settings = context.watch<SettingsService>();
+    final gutter = AppSpacing.gutter(context);
+
+    void selection() => HapticService.selection(settings.hapticsEnabled);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.get('settings')),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text(l10n.get('settings'))),
       body: ListView(
+        padding: EdgeInsets.fromLTRB(
+            gutter, 0, gutter, AppSpacing.bottomInset(context, spacing: 32)),
         children: [
-          _buildSectionHeader(context, 'Campus'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment<String>(
-                  value: 'WH',
-                  label: Text('WH'),
-                ),
-                ButtonSegment<String>(
-                  value: 'TA',
-                  label: Text('TA'),
-                ),
-                ButtonSegment<String>(
-                  value: 'TGS',
-                  label: Text('TGS'),
-                ),
-              ],
-              selected: <String>{settings.campus},
-              onSelectionChanged: (Set<String> newSelection) {
-                HapticService.selection(settings.hapticsEnabled);
-                settings.updateCampus(newSelection.first);
-              },
-            ),
+          const _AccountSection(),
+
+          SectionHeader(l10n.get('language')),
+          ConnectedButtonGroup<String>(
+            items: [
+              ButtonGroupItem(value: 'de', label: l10n.get('german')),
+              ButtonGroupItem(value: 'en', label: l10n.get('english')),
+            ],
+            selected: settings.locale.languageCode,
+            onChanged: (code) {
+              selection();
+              settings.updateLocale(Locale(code));
+            },
+          ),
+
+          SectionHeader(l10n.get('campus')),
+          ConnectedButtonGroup<String>(
+            items: const [
+              ButtonGroupItem(value: 'WH', label: 'WH'),
+              ButtonGroupItem(value: 'TA', label: 'TA'),
+              ButtonGroupItem(value: 'TGS', label: 'TGS'),
+            ],
+            selected: settings.campus,
+            onChanged: (campus) {
+              selection();
+              settings.updateCampus(campus);
+            },
           ),
           if (settings.campus == 'TGS')
             Padding(
-              padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Text(
-                Localizations.localeOf(context).languageCode == 'de'
-                    ? 'Der Campus TGS ändert nur die Haltestelle in der Transport-Ansicht. Die Mensa bleibt Wilhelminenhof.'
-                    : 'The TGS campus only affects the stop in the Transport view. The Mensa remains Wilhelminenhof.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                l10n.get('campusTgsNote'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
-                textAlign: TextAlign.center,
               ),
             ),
-          const SizedBox(height: 8),
-          ListTile(
-            leading: Icon(Icons.restaurant_menu, color: Theme.of(context).colorScheme.primary),
-            title: Text(Localizations.localeOf(context).languageCode == 'de' ? 'Mensa Einstellungen' : 'Mensa Settings'),
-            subtitle: Text(
-              Localizations.localeOf(context).languageCode == 'de' 
-                ? 'Preise, Ansicht & Kategorien'
-                : 'Prices, View & Categories',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              HapticService.confirm(settings.hapticsEnabled);
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const MensaSettingsScreen()),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          const Divider(),
-          _buildSectionHeader(context, Localizations.localeOf(context).languageCode == 'de' ? 'Stundenplan' : 'Timetable'),
-          SwitchListTile(
-            title: Text(l10n.get('showWeekends')),
-            value: settings.showWeekends,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateShowWeekends(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('showBreakTime')),
-            value: settings.showBreakTime,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateShowBreakTime(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('compactTimetable')),
-            value: settings.compactTimetableView,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateCompactTimetableView(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          const Divider(),
-          _buildSectionHeader(context, l10n.get('app')),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: SegmentedButton<Locale>(
-              segments: [
-                ButtonSegment<Locale>(
-                  value: const Locale('de'),
-                  label: Text(l10n.get('german')),
-                ),
-                ButtonSegment<Locale>(
-                  value: const Locale('en'),
-                  label: Text(l10n.get('english')),
-                ),
-              ],
-              selected: <Locale>{settings.locale},
-              onSelectionChanged: (Set<Locale> newSelection) {
-                HapticService.selection(settings.hapticsEnabled);
-                settings.updateLocale(newSelection.first);
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            title: Text(l10n.get('haptics')),
-            value: settings.hapticsEnabled,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(true);
-              } else {
-                HapticService.toggleOff(true);
-              }
-              settings.updateHapticsEnabled(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('animations')),
-            value: settings.animationsEnabled,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateAnimationsEnabled(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('hideNavigationLabels')),
-            value: settings.hideLabels,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateHideLabels(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('lsfOnEmailLongPress')),
-            value: settings.lsfOnEmailLongPress,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateLsfOnEmailLongPress(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          const Divider(),
-          _buildSectionHeader(context, l10n.get('theme')),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: SegmentedButton<ThemeMode>(
-              segments: [
-                ButtonSegment<ThemeMode>(
-                  value: ThemeMode.system,
-                  label: Text(l10n.get('system')),
-                ),
-                ButtonSegment<ThemeMode>(
-                  value: ThemeMode.light,
-                  label: Text(l10n.get('light')),
-                ),
-                ButtonSegment<ThemeMode>(
-                  value: ThemeMode.dark,
-                  label: Text(l10n.get('dark')),
-                ),
-              ],
-              selected: <ThemeMode>{settings.themeMode},
-              onSelectionChanged: (Set<ThemeMode> newSelection) {
-                HapticService.selection(settings.hapticsEnabled);
-                settings.updateThemeMode(newSelection.first);
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            title: Text(l10n.get('dynamicColor')),
-            value: settings.useDynamicColor,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateUseDynamicColor(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
-          ),
-          SwitchListTile(
-            title: Text(l10n.get('amoledTheme')),
-            value: settings.amoledTheme,
-            onChanged: (value) {
-              if (value) {
-                HapticService.toggleOn(settings.hapticsEnabled);
-              } else {
-                HapticService.toggleOff(settings.hapticsEnabled);
-              }
-              settings.updateAmoledTheme(value);
-            },
-            activeThumbColor: Theme.of(context).colorScheme.primary,
+          const SizedBox(height: 12),
+          ListGroup(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.restaurant_menu_rounded),
+                title: Text(l10n.get('mensaSettings')),
+                subtitle: Text(l10n.get('mensaSettingsSubtitle')),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  HapticService.confirm(settings.hapticsEnabled);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const MensaSettingsScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
 
-          const Divider(),
-          const SizedBox(height: 16),
-          _buildAuthSection(context, l10n, context.watch<AuthService>()),
-          const SizedBox(height: 16),
-          const Divider(),
-          ListTile(
-            leading: Icon(Icons.info_outline, color: Theme.of(context).colorScheme.primary),
-            title: Text(l10n.get('about')),
-            subtitle: Text(
-              'Uniwe',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+          SectionHeader(l10n.get('timetable')),
+          ListGroup(
+            children: [
+              _SwitchTile(
+                icon: Icons.weekend_outlined,
+                title: l10n.get('showWeekends'),
+                value: settings.showWeekends,
+                onChanged: settings.updateShowWeekends,
               ),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              HapticService.confirm(settings.hapticsEnabled);
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AboutScreen()),
-              );
+              _SwitchTile(
+                icon: Icons.emoji_food_beverage_outlined,
+                title: l10n.get('showBreakTime'),
+                value: settings.showBreakTime,
+                onChanged: settings.updateShowBreakTime,
+              ),
+            ],
+          ),
+
+          SectionHeader(l10n.get('theme')),
+          ConnectedButtonGroup<ThemeMode>(
+            items: [
+              ButtonGroupItem(
+                value: ThemeMode.system,
+                label: l10n.get('system'),
+                icon: Icons.brightness_auto_outlined,
+              ),
+              ButtonGroupItem(
+                value: ThemeMode.light,
+                label: l10n.get('light'),
+                icon: Icons.light_mode_outlined,
+              ),
+              ButtonGroupItem(
+                value: ThemeMode.dark,
+                label: l10n.get('dark'),
+                icon: Icons.dark_mode_outlined,
+              ),
+            ],
+            selected: settings.themeMode,
+            onChanged: (mode) {
+              selection();
+              settings.updateThemeMode(mode);
             },
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 12),
+          ListGroup(
+            children: [
+              _SwitchTile(
+                icon: Icons.palette_outlined,
+                title: l10n.get('dynamicColor'),
+                value: settings.useDynamicColor,
+                onChanged: settings.updateUseDynamicColor,
+              ),
+              _SwitchTile(
+                icon: Icons.contrast_rounded,
+                title: l10n.get('amoledTheme'),
+                value: settings.amoledTheme,
+                onChanged: settings.updateAmoledTheme,
+              ),
+            ],
+          ),
+
+          SectionHeader(l10n.get('app')),
+          ListGroup(
+            children: [
+              _SwitchTile(
+                icon: Icons.density_small_rounded,
+                title: l10n.get('compactView'),
+                subtitle: l10n.get('compactViewSubtitle'),
+                value: settings.compactView,
+                onChanged: settings.updateCompactView,
+              ),
+              _SwitchTile(
+                icon: Icons.vibration_rounded,
+                title: l10n.get('haptics'),
+                value: settings.hapticsEnabled,
+                // Always give feedback for this one, so turning haptics on
+                // (or off) is felt immediately.
+                forceHaptics: true,
+                onChanged: settings.updateHapticsEnabled,
+              ),
+              _SwitchTile(
+                icon: Icons.animation_rounded,
+                title: l10n.get('animations'),
+                value: settings.animationsEnabled,
+                onChanged: settings.updateAnimationsEnabled,
+              ),
+              _SwitchTile(
+                icon: Icons.mail_outline_rounded,
+                title: l10n.get('emailInNavBar'),
+                subtitle: l10n.get('emailInNavBarSubtitle'),
+                value: settings.emailInNavBar,
+                onChanged: settings.updateEmailInNavBar,
+              ),
+              _SwitchTile(
+                icon: Icons.label_off_outlined,
+                title: l10n.get('hideNavigationLabels'),
+                value: settings.hideLabels,
+                onChanged: settings.updateHideLabels,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+          ListGroup(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.info_outline_rounded),
+                title: Text(l10n.get('about')),
+                subtitle: const Text('Uniwe'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  HapticService.confirm(settings.hapticsEnabled);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AboutScreen()),
+                  );
+                },
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSectionHeader(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
-      ),
+class _SwitchTile extends StatelessWidget {
+  const _SwitchTile({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+    this.forceHaptics = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final bool forceHaptics;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: Icon(icon),
+      title: Text(title),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      value: value,
+      onChanged: (newValue) {
+        final enabled =
+            forceHaptics || context.read<SettingsService>().hapticsEnabled;
+        if (newValue) {
+          HapticService.toggleOn(enabled);
+        } else {
+          HapticService.toggleOff(enabled);
+        }
+        onChanged(newValue);
+      },
+    );
+  }
+}
+
+class _AccountSection extends StatelessWidget {
+  const _AccountSection();
+
+  void _openLogs(BuildContext context) {
+    HapticService.confirm(context.read<SettingsService>().hapticsEnabled);
+    context.read<LogService>().info('Opening logs via long-press');
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LogScreen()),
     );
   }
 
-  Widget _buildAuthSection(BuildContext context, AppLocalizations l10n, AuthService auth) {
+  Future<void> _confirmLogout(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    final auth = context.read<AuthService>();
+    HapticService.confirm(context.read<SettingsService>().hapticsEnabled);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.logout_rounded),
+        title: Text(l10n.get('logoutConfirmTitle')),
+        content: Text(l10n.get('logoutConfirmBody')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l10n.get('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l10n.get('logout')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await auth.logout();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final settings = context.watch<SettingsService>();
-    if (auth.isAuthenticated) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (auth.username != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: theme.colorScheme.primaryContainer,
-                      child: Text(
-                        auth.username![0].toUpperCase(),
-                        style: TextStyle(
-                          color: theme.colorScheme.onPrimaryContainer,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      auth.username!,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+    final scheme = theme.colorScheme;
+    final isAuthenticated =
+        context.select<AuthService, bool>((a) => a.isAuthenticated);
+    final username = context.select<AuthService, String?>((a) => a.username);
+
+    final Widget tile;
+    if (isAuthenticated) {
+      final name = (username == null || username.isEmpty) ? null : username;
+      tile = ListTile(
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 8, 12, 8),
+        leading: CircleAvatar(
+          backgroundColor: scheme.primaryContainer,
+          foregroundColor: scheme.onPrimaryContainer,
+          child: name == null
+              ? const Icon(Icons.person_outline_rounded)
+              : Text(
+                  name[0].toUpperCase(),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: scheme.onPrimaryContainer,
+                  ),
                 ),
-              ),
-            GestureDetector(
-              onLongPress: () {
-                HapticService.confirm(settings.hapticsEnabled);
-                context.read<LogService>().info('Opening logs via long-press');
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LogScreen()),
-                );
-              },
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.errorContainer,
-                  foregroundColor: theme.colorScheme.onErrorContainer,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                onPressed: () {
-                  HapticService.confirm(settings.hapticsEnabled);
-                  context.read<AuthService>().logout();
-                },
-                icon: const Icon(Icons.logout),
-                label: const Text('Logout', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
+        ),
+        title: Text(name ?? l10n.get('account')),
+        subtitle: Text(l10n.get('signedIn')),
+        // The diagnostic log stays a hidden long-press, as before.
+        onLongPress: () => _openLogs(context),
+        trailing: FilledButton.tonalIcon(
+          style: FilledButton.styleFrom(
+            backgroundColor: scheme.errorContainer,
+            foregroundColor: scheme.onErrorContainer,
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+          ),
+          onPressed: () => _confirmLogout(context),
+          onLongPress: () => _openLogs(context),
+          icon: const Icon(Icons.logout_rounded, size: 18),
+          label: Text(l10n.get('logout')),
         ),
       );
     } else {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-        child: FilledButton.icon(
+      tile = ListTile(
+        contentPadding: const EdgeInsetsDirectional.fromSTEB(16, 8, 12, 8),
+        leading: CircleAvatar(
+          backgroundColor: scheme.secondaryContainer,
+          foregroundColor: scheme.onSecondaryContainer,
+          child: const Icon(Icons.person_outline_rounded),
+        ),
+        title: Text(l10n.get('loginTitle')),
+        subtitle: Text(l10n.get('scheduleLoginPrompt')),
+        onLongPress: () => _openLogs(context),
+        trailing: FilledButton(
           style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            minimumSize: const Size(0, 40),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
           ),
           onPressed: () {
-            HapticService.confirm(settings.hapticsEnabled);
+            HapticService.confirm(
+              context.read<SettingsService>().hapticsEnabled,
+            );
             showLoginDialog(context);
           },
-          icon: const Icon(Icons.login),
-          label: const Text('Anmelden', style: TextStyle(fontWeight: FontWeight.bold)),
+          child: Text(l10n.get('login')),
         ),
       );
     }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: ListGroup(children: [tile]),
+    );
   }
 }

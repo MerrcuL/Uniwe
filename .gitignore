@@ -47,3 +47,7 @@ app.*.map.json
 key.properties
 .env
 google-services.json
+
+# Saved LSF/web pages used as references for scraping (personal data)
+/Web Pages/
+/android/build/

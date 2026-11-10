@@ -2,109 +2,137 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/log_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/expressive.dart';
 
 class LogScreen extends StatelessWidget {
   const LogScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     final logService = context.watch<LogService>();
     final logs = logService.logs;
 
+    void showMessage(String message) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Application Logs'),
+        title: Text(l10n.get('logs')),
         actions: [
           IconButton(
-            icon: const Icon(Icons.copy_all),
-            tooltip: 'Copy all logs',
-            onPressed: () {
-              final allLogs = logs.map((e) => '[${e.formattedTime}] [${e.level.name.toUpperCase()}] ${e.message}${e.details != null ? '\n${e.details}' : ''}').join('\n');
-              Clipboard.setData(ClipboardData(text: allLogs));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logs copied to clipboard')));
-            },
+            icon: const Icon(Icons.copy_all_rounded),
+            tooltip: l10n.get('copyAllLogs'),
+            onPressed: logs.isEmpty
+                ? null
+                : () {
+                    final allLogs = logs
+                        .map((e) =>
+                            '[${e.formattedTime}] [${e.level.name.toUpperCase()}] ${e.message}${e.details != null ? '\n${e.details}' : ''}')
+                        .join('\n');
+                    Clipboard.setData(ClipboardData(text: allLogs));
+                    showMessage(l10n.get('logsCopied'));
+                  },
           ),
           IconButton(
-            icon: const Icon(Icons.delete_sweep),
-            tooltip: 'Clear logs',
-            onPressed: () => logService.clear(),
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: l10n.get('clearLogs'),
+            onPressed: logs.isEmpty ? null : logService.clear,
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: logs.isEmpty
-          ? const Center(child: Text('No logs available'))
+          ? StatusMessage(
+              icon: Icons.receipt_long_outlined,
+              title: l10n.get('noLogs'),
+            )
           : ListView.separated(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: logs.length,
               separatorBuilder: (context, index) => const Divider(height: 1),
               itemBuilder: (context, index) {
-                final log = logs[index];
+                final entry = logs[index];
+                final details = entry.details;
                 return ListTile(
                   dense: true,
                   title: Text(
-                    log.message,
+                    entry.message,
                     style: TextStyle(
-                      fontWeight: log.level == LogLevel.error ? FontWeight.bold : FontWeight.normal,
-                      color: _getLogColor(log.level, context),
+                      fontWeight: entry.level == LogLevel.error
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                      color: _levelColor(entry.level, context),
                     ),
                   ),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${log.formattedTime} [${log.level.name.toUpperCase()}]',
-                        style: Theme.of(context).textTheme.bodySmall,
+                        '${entry.formattedTime} [${entry.level.name.toUpperCase()}]',
+                        style: theme.textTheme.bodySmall,
                       ),
-                      if (log.details != null)
+                      if (details != null)
                         Text(
-                          log.details!,
+                          details,
                           maxLines: 5,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall,
+                          style: theme.textTheme.labelSmall,
                         ),
                     ],
                   ),
-                  onTap: log.details != null
-                      ? () {
-                          showDialog(
+                  onTap: details == null
+                      ? null
+                      : () => showDialog<void>(
                             context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Log Details'),
+                            builder: (dialogContext) => AlertDialog(
+                              title: Text(l10n.get('logDetails')),
                               content: SingleChildScrollView(
-                                child: SelectableText(log.details!),
+                                child: SelectableText(details),
                               ),
                               actions: [
-                                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(),
+                                  child: Text(l10n.get('close')),
+                                ),
                                 TextButton(
                                   onPressed: () {
-                                    Clipboard.setData(ClipboardData(text: log.details!));
-                                    Navigator.pop(context);
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Details copied')));
+                                    Clipboard.setData(
+                                      ClipboardData(text: details),
+                                    );
+                                    Navigator.of(dialogContext).pop();
+                                    showMessage(l10n.get('detailsCopied'));
                                   },
-                                  child: const Text('Copy'),
+                                  child: Text(l10n.get('copy')),
                                 ),
                               ],
                             ),
-                          );
-                        }
-                      : null,
+                          ),
                 );
               },
             ),
     );
   }
 
-  Color _getLogColor(LogLevel level, BuildContext context) {
+  Color _levelColor(LogLevel level, BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     switch (level) {
       case LogLevel.error:
-        return Theme.of(context).colorScheme.error;
+        return scheme.error;
       case LogLevel.warning:
-        return Colors.orange;
+        return SemanticColors.of(context).warning;
       case LogLevel.debug:
-        return Colors.blueGrey;
+        return scheme.onSurfaceVariant;
       case LogLevel.info:
-        return Theme.of(context).colorScheme.onSurface;
+        return scheme.onSurface;
     }
   }
 }

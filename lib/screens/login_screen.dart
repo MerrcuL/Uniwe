@@ -1,23 +1,21 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/gestures.dart';
-import '../services/auth_service.dart';
-import '../services/settings_service.dart';
-import '../services/haptic_service.dart';
+
 import '../l10n/app_localizations.dart';
+import '../services/auth_service.dart';
+import '../services/haptic_service.dart';
+import '../services/settings_service.dart';
+import '../widgets/app_sheet.dart';
+import '../widgets/expressive.dart';
 
 /// Shows the login form as a modal bottom sheet.
 /// Returns true if login was successful.
 Future<bool> showLoginDialog(BuildContext context) async {
-  final result = await showModalBottomSheet<bool>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-    ),
+  final result = await showAppSheet<bool>(
+    context,
     builder: (ctx) => const _LoginSheet(),
   );
   return result == true;
@@ -34,7 +32,10 @@ class _LoginSheetState extends State<_LoginSheet> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
-  String? _errorMessage;
+  bool _obscurePassword = true;
+
+  /// Localization key of the current error, if any.
+  String? _errorKey;
   late final TapGestureRecognizer _learnMoreRecognizer;
 
   @override
@@ -58,33 +59,37 @@ class _LoginSheetState extends State<_LoginSheet> {
   }
 
   Future<void> _handleLogin() async {
+    if (_isLoading) return;
     final user = _usernameController.text.trim();
     final pass = _passwordController.text;
 
     if (user.isEmpty || pass.isEmpty) {
-      final l10n = AppLocalizations.of(context);
-      setState(() => _errorMessage = l10n.get('loginFieldsEmpty'));
+      setState(() => _errorKey = 'loginFieldsEmpty');
       return;
     }
 
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _errorKey = null;
     });
 
-    final authService = context.read<AuthService>();
-    final error = await authService.login(user, pass);
-
+    final result = await context.read<AuthService>().login(user, pass);
     if (!mounted) return;
 
-    if (error != null) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = error;
-      });
-    } else {
-      TextInput.finishAutofillContext();
-      Navigator.of(context).pop(true);
+    switch (result) {
+      case LoginResult.success:
+        TextInput.finishAutofillContext();
+        Navigator.of(context).pop(true);
+      case LoginResult.invalidCredentials:
+        setState(() {
+          _isLoading = false;
+          _errorKey = 'loginFailed';
+        });
+      case LoginResult.networkError:
+        setState(() {
+          _isLoading = false;
+          _errorKey = 'loginNetworkError';
+        });
     }
   }
 
@@ -92,56 +97,48 @@ class _LoginSheetState extends State<_LoginSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final scheme = theme.colorScheme;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset),
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + bottomInset),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Handle bar
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 24),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
+          const Center(
+            child: ShapeBadge(icon: Icons.school_outlined, size: 72),
           ),
-          Icon(Icons.school, size: 48, color: theme.colorScheme.primary),
           const SizedBox(height: 16),
           Text(
             l10n.get('loginTitle'),
             textAlign: TextAlign.center,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+            style: theme.textTheme.headlineSmall,
           ),
           const SizedBox(height: 4),
           Text(
             l10n.get('loginSubtitle'),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: scheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           AutofillGroup(
             child: Column(
               children: [
                 TextField(
                   controller: _usernameController,
-                  decoration: const InputDecoration(
-                    labelText: 's0000000',
-                    prefixIcon: Icon(Icons.person_outline),
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: l10n.get('username'),
+                    hintText: 's0000000',
+                    prefixIcon: const Icon(Icons.person_outline_rounded),
+                    border: const OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  enableSuggestions: false,
                   autofillHints: const [AutofillHints.username],
                   enabled: !_isLoading,
                 ),
@@ -150,10 +147,19 @@ class _LoginSheetState extends State<_LoginSheet> {
                   controller: _passwordController,
                   decoration: InputDecoration(
                     labelText: l10n.get('password'),
-                    prefixIcon: const Icon(Icons.lock_outline),
+                    prefixIcon: const Icon(Icons.lock_outline_rounded),
                     border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined),
+                      tooltip: l10n.get(
+                          _obscurePassword ? 'showPassword' : 'hidePassword'),
+                      onPressed: () =>
+                          setState(() => _obscurePassword = !_obscurePassword),
+                    ),
                   ),
-                  obscureText: true,
+                  obscureText: _obscurePassword,
                   textInputAction: TextInputAction.done,
                   autofillHints: const [AutofillHints.password],
                   onSubmitted: (_) => _handleLogin(),
@@ -162,47 +168,59 @@ class _LoginSheetState extends State<_LoginSheet> {
               ],
             ),
           ),
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _errorMessage!,
-              style: TextStyle(color: theme.colorScheme.error),
-              textAlign: TextAlign.center,
-            ),
-          ],
+          AnimatedSize(
+            duration: Durations.medium4,
+            curve: Curves.easeInOutCubicEmphasized,
+            alignment: Alignment.topCenter,
+            child: _errorKey == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        l10n.get(_errorKey!),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: scheme.error,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+          ),
           const SizedBox(height: 24),
           FilledButton(
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            onPressed: _isLoading ? null : () {
-              final hapticsEnabled = context.read<SettingsService>().hapticsEnabled;
-              HapticService.confirm(hapticsEnabled);
-              _handleLogin();
-            },
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 56)),
+            onPressed: _isLoading
+                ? null
+                : () {
+                    HapticService.confirm(
+                      context.read<SettingsService>().hapticsEnabled,
+                    );
+                    _handleLogin();
+                  },
             child: _isLoading
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ? const SizedBox.square(
+                    dimension: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
                   )
-                : Text(l10n.get('login'), style: const TextStyle(fontSize: 16)),
+                : Text(l10n.get('login')),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text.rich(
             TextSpan(
               children: [
                 TextSpan(
                   text: '${l10n.get('loginStorageNote')} ',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 TextSpan(
                   text: l10n.get('learnMore'),
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.bold,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
                   ),
                   recognizer: _learnMoreRecognizer,
                 ),

@@ -25,11 +25,18 @@ Als ich mich im Oktober 2025 einschrieb, war ich überrascht, dass eine so groß
 Übersetzt mit DeepL.com (kostenlose Version)
 
 ### Kernfunktionen
-- **Stundenplan:** Automatisch aus LSF importiert und ordentlich dargestellt.
+- **Stundenplan:** Automatisch aus LSF importiert, in Tages- oder Wochenansicht, mit Detailfenster für jede Veranstaltung.
+- **Noten:** Dein *Noten- und Klassenspiegel* aus LSF: ECTS, Durchschnitt, Modulgruppen, Bemerkungen und die Notenverteilung jeder Prüfung.
+- **Bescheinigungen:** Immatrikulationsbescheinigungen (Deutsch/Englisch) und Leistungsübersichten als PDF zum Öffnen oder Teilen.
+- **Moodle:** Automatische Anmeldung mit deinen gespeicherten HTW-Zugangsdaten, in einem eingebetteten Browser, der dem hellen/dunklen Design folgt.
 - **Webmail-Integration:** Schnelle Überprüfung im Hintergrund und lokale Benachrichtigungen für das HTW-Postfach.
-- **Mensa-Speiseplan:** Tägliches Essensangebot der HTW-Mensen.
+- **Mensa-Speiseplan:** Tägliches Essensangebot der HTW-Mensen, mit Ernährungsfiltern und Campusauswahl.
 - **Verkehr:** Live-Abfahrten von Trams an den Campussen.
+- **Material 3 Expressive:** Schwebende Navigationsleiste, dynamische Farben, animierter Startbildschirm, Zurück-Vorschau.
 - **Sicher & Privat:** Anmeldedaten werden sicher und lokal auf deinem Gerät gespeichert.
+
+### Neu in 2.0
+Uniwe 2.0 ist komplett neu gestaltet (Material 3 Expressive), bringt Moodle, Noten und Bescheinigungen mit und macht Stundenplan, Mensa und Verkehr schneller und zuverlässiger.
 
 ### Tipp für die Ansicht von E-Mails
 - Gehe zu „Einstellungen“ → „Mail“

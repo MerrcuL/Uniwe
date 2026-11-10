@@ -7,6 +7,10 @@ class TransportArrival {
   final String provenance;
   final String direction;
 
+  /// The trip was cancelled by the operator. The API reports such departures
+  /// with `when: null`, so they must not be presented as running on schedule.
+  final bool cancelled;
+
   TransportArrival({
     required this.lineName,
     this.when,
@@ -15,20 +19,29 @@ class TransportArrival {
     required this.originName,
     required this.provenance,
     required this.direction,
+    this.cancelled = false,
   });
 
   factory TransportArrival.fromJson(Map<String, dynamic> json) {
+    final rawWhen = json['when'] as String?;
+    final rawPlanned = json['plannedWhen'] as String?;
     return TransportArrival(
-      lineName: json['line']?['name'] ?? '',
-      when: json['when'] != null ? DateTime.parse(json['when']).toLocal() : null,
-      plannedWhen: json['plannedWhen'] != null ? DateTime.parse(json['plannedWhen']).toLocal() : null,
-      delay: json['delay'] ?? 0,
-      originName: json['origin']?['name'] ?? '',
-      provenance: json['provenance'] ?? '',
-      direction: json['direction'] ?? '',
+      lineName: json['line']?['name']?.toString() ?? '',
+      when: rawWhen != null ? DateTime.tryParse(rawWhen)?.toLocal() : null,
+      plannedWhen:
+          rawPlanned != null ? DateTime.tryParse(rawPlanned)?.toLocal() : null,
+      delay: (json['delay'] as num?)?.toInt() ?? 0,
+      originName: json['origin']?['name']?.toString() ?? '',
+      provenance: json['provenance']?.toString() ?? '',
+      direction: json['direction']?.toString() ?? '',
+      cancelled: json['cancelled'] == true,
     );
   }
 
   DateTime get scheduledTime => plannedWhen ?? when ?? DateTime.now();
   DateTime get actualTime => when ?? plannedWhen ?? DateTime.now();
+
+  /// Difference between real-time and scheduled departure, in whole minutes.
+  int get delayMinutes =>
+      (actualTime.difference(scheduledTime).inSeconds / 60).round();
 }

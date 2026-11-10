@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../widgets/fade_indexed_stack.dart';
-import '../services/settings_service.dart';
-import '../services/haptic_service.dart';
-import '../services/update_service.dart';
-
+import '../app_events.dart';
 import '../l10n/app_localizations.dart';
-import 'timetable_screen.dart';
-import 'mensa_screen.dart';
-import 'transport_screen.dart';
+import '../services/haptic_service.dart';
+import '../services/settings_service.dart';
+import '../services/update_service.dart';
+import '../widgets/fade_indexed_stack.dart';
+import '../widgets/floating_tab_bar.dart';
+import '../widgets/update_dialog.dart';
 import 'email_screen.dart';
-import 'settings_screen.dart';
-import '../main.dart' as import_main;
+import 'mensa_screen.dart';
+import 'more_screen.dart';
+import 'timetable_screen.dart';
+import 'transport_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -23,38 +23,69 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 0;
-  DateTime? _lastPressedAt;
+class _Destination {
+  const _Destination(this.icon, this.selectedIcon, this.labelKey);
 
-  final List<Widget> _screens = const [
+  final IconData icon;
+  final IconData selectedIcon;
+  final String labelKey;
+}
+
+class _MainScreenState extends State<MainScreen> {
+  /// Window width from which the navigation bar becomes a navigation rail.
+  static const double _railBreakpoint = 600;
+
+  // Order must match [AppTab].
+  static const List<_Destination> _destinations = [
+    _Destination(
+        Icons.calendar_month_outlined, Icons.calendar_month, 'timetable'),
+    _Destination(Icons.restaurant_outlined, Icons.restaurant, 'mensa'),
+    _Destination(Icons.email_outlined, Icons.email, 'email'),
+    _Destination(
+        Icons.directions_transit_outlined, Icons.directions_transit, 'transport'),
+    _Destination(Icons.menu_rounded, Icons.menu_rounded, 'menu'),
+  ];
+
+  static const List<Widget> _screens = [
     TimetableScreen(),
     MensaScreen(),
     EmailScreen(),
     TransportScreen(),
-    SettingsScreen(),
+    MoreScreen(),
   ];
+
+  int _selectedIndex = AppEvents.currentTab.value;
+  DateTime? _lastBackPressedAt;
 
   @override
   void initState() {
     super.initState();
-    import_main.mainTabNotifier.addListener(_onMainTabChanged);
+    AppEvents.currentTab.addListener(_onTabChanged);
     _checkForUpdatesOnStartup();
-  }
-
-
-  void _onMainTabChanged() {
-    if (mounted) {
-      setState(() {
-        _selectedIndex = import_main.mainTabNotifier.value;
-      });
-    }
   }
 
   @override
   void dispose() {
-    import_main.mainTabNotifier.removeListener(_onMainTabChanged);
+    AppEvents.currentTab.removeListener(_onTabChanged);
     super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (mounted && _selectedIndex != AppEvents.currentTab.value) {
+      setState(() => _selectedIndex = AppEvents.currentTab.value);
+    }
+  }
+
+  bool get _hapticsEnabled => context.read<SettingsService>().hapticsEnabled;
+
+  void _onDestinationSelected(int index) {
+    if (index == _selectedIndex) {
+      // Tapping the current destination again refreshes it.
+      AppEvents.reselectTab(index);
+      return;
+    }
+    HapticService.selection(_hapticsEnabled);
+    AppEvents.currentTab.value = index;
   }
 
   Future<void> _checkForUpdatesOnStartup() async {
@@ -66,162 +97,144 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
     if (updateInfo == null || !updateInfo.updateAvailable) return;
 
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(Icons.system_update, color: theme.colorScheme.primary, size: 32),
-        title: Text(l10n.get('updateAvailable')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${l10n.get('newVersion')}: ${updateInfo.latestVersion}',
-              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${l10n.get('currentVersion')}: ${updateInfo.currentVersion}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (updateInfo.releaseBody.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Divider(),
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 200),
-                child: SingleChildScrollView(
-                  child: Text(
-                    updateInfo.releaseBody,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(l10n.get('later')),
-          ),
-          FilledButton.icon(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              launchUrl(
-                Uri.parse(updateInfo.releaseUrl),
-                mode: LaunchMode.externalApplication,
-              );
-            },
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: Text(l10n.get('download')),
-          ),
-        ],
-      ),
-    );
+    showUpdateDialog(context, updateInfo);
   }
+
+  Future<void> _onBack() async {
+    // Give the visible tab the first chance (web view history).
+    if (await AppEvents.handleBack(_selectedIndex)) return;
+    if (!mounted) return;
+
+    final now = DateTime.now();
+    final last = _lastBackPressedAt;
+    if (last != null && now.difference(last) <= const Duration(seconds: 2)) {
+      SystemNavigator.pop();
+      return;
+    }
+
+    _lastBackPressedAt = now;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).get('pressAgainToExit')),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  Widget _icon(int tab, {required bool selected}) {
+    final destination = _destinations[tab];
+    return Icon(selected ? destination.selectedIcon : destination.icon);
+  }
+
+  /// The tabs shown in the bar, by [AppTab] id.
+  static List<int> _visibleTabs({required bool emailInNavBar}) => [
+        AppTab.timetable,
+        AppTab.mensa,
+        if (emailInNavBar) AppTab.email,
+        AppTab.transport,
+        AppTab.more,
+      ];
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final hideLabels =
+        context.select<SettingsService, bool>((s) => s.hideLabels);
+    final animationsEnabled =
+        context.select<SettingsService, bool>((s) => s.animationsEnabled);
+    final useRail = MediaQuery.sizeOf(context).width >= _railBreakpoint;
 
-    final settings = context.watch<SettingsService>();
+    final emailInNavBar =
+        context.select<SettingsService, bool>((s) => s.emailInNavBar);
+    final tabs = _visibleTabs(emailInNavBar: emailInNavBar);
+    // The e-mail tab was just moved into the menu while it was open.
+    if (!tabs.contains(_selectedIndex)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) AppEvents.currentTab.value = AppTab.more;
+      });
+    }
+    final barIndex =
+        tabs.contains(_selectedIndex) ? tabs.indexOf(_selectedIndex) : tabs.length - 1;
+
+    final content = FadeIndexedStack(
+      index: _selectedIndex,
+      duration: Durations.medium2,
+      animate: animationsEnabled,
+      children: _screens,
+    );
 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (bool didPop, dynamic result) {
-        if (didPop) return;
-
-        final now = DateTime.now();
-        if (_lastPressedAt == null ||
-            now.difference(_lastPressedAt!) > const Duration(seconds: 2)) {
-          _lastPressedAt = now;
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.get('pressAgainToExit')),
-              duration: const Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        } else {
-          SystemNavigator.pop();
-        }
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _onBack();
       },
       child: Scaffold(
-        body: FadeIndexedStack(
-        index: _selectedIndex,
-        duration: settings.animationsEnabled 
-            ? const Duration(milliseconds: 400) 
-            : Duration.zero,
-        animate: settings.animationsEnabled,
-        children: _screens,
+        // The bar floats over the content; screens pad their scrollables
+        // with the inset the scaffold reports for it.
+        extendBody: !useRail,
+        body: useRail
+            ? Row(
+                children: [
+                  SafeArea(
+                    right: false,
+                    child: NavigationRail(
+                      selectedIndex: barIndex,
+                      onDestinationSelected: (i) =>
+                          _onDestinationSelected(tabs[i]),
+                      groupAlignment: 0,
+                      labelType: hideLabels
+                          ? NavigationRailLabelType.none
+                          : NavigationRailLabelType.all,
+                      destinations: [
+                        for (final tab in tabs)
+                          NavigationRailDestination(
+                            icon: _icon(tab, selected: false),
+                            selectedIcon: _icon(tab, selected: true),
+                            label: Text(l10n.get(_destinations[tab].labelKey)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  // Report the width that is actually left next to the rail,
+                  // so screens size their gutters from it.
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => MediaQuery(
+                        data: MediaQuery.of(context).copyWith(
+                          size: Size(
+                            constraints.maxWidth,
+                            constraints.maxHeight,
+                          ),
+                        ),
+                        child: content,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : content,
+        bottomNavigationBar: useRail
+            ? null
+            : FloatingTabBar(
+                selectedIndex: barIndex,
+                showLabels: !hideLabels,
+                animate: animationsEnabled,
+                onSelected: (i) => _onDestinationSelected(tabs[i]),
+                onReselected: (i) => _onDestinationSelected(tabs[i]),
+                onScrubbedOver: () =>
+                    HapticService.selection(_hapticsEnabled),
+                items: [
+                  for (final tab in tabs)
+                    FloatingTabItem(
+                      icon: _destinations[tab].icon,
+                      selectedIcon: _destinations[tab].selectedIcon,
+                      label: l10n.get(_destinations[tab].labelKey),
+                    ),
+                ],
+              ),
       ),
-      bottomNavigationBar: NavigationBar(
-        height: settings.hideLabels ? 60 : null,
-        labelBehavior: settings.hideLabels
-            ? NavigationDestinationLabelBehavior.alwaysHide
-            : NavigationDestinationLabelBehavior.alwaysShow,
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          if (index != _selectedIndex) {
-            HapticService.selection(settings.hapticsEnabled);
-            setState(() {
-              _selectedIndex = index;
-            });
-          } else {
-            import_main.tabRefreshController.add(index);
-          }
-        },
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.calendar_month_outlined),
-            selectedIcon: const Icon(Icons.calendar_month),
-            label: l10n.get('timetable'),
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.restaurant_outlined),
-            selectedIcon: const Icon(Icons.restaurant),
-            label: l10n.get('mensa'),
-          ),
-          NavigationDestination(
-            icon: GestureDetector(
-              onLongPress: () {
-                import_main.emailLongPressController.add(null);
-                if (_selectedIndex != 2) {
-                  HapticService.selection(settings.hapticsEnabled);
-                  setState(() {
-                    _selectedIndex = 2;
-                  });
-                }
-              },
-              child: const Icon(Icons.email_outlined),
-            ),
-            selectedIcon: GestureDetector(
-              onLongPress: () {
-                import_main.emailLongPressController.add(null);
-              },
-              child: const Icon(Icons.email),
-            ),
-            label: l10n.get('email'),
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.directions_transit_outlined),
-            selectedIcon: Icon(Icons.directions_transit),
-            label: 'Transport',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.settings_outlined),
-            selectedIcon: const Icon(Icons.settings),
-            label: l10n.get('settings'),
-          ),
-        ],
-      ),
-    ));
+    );
   }
 }

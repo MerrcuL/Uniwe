@@ -1,26 +1,37 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:provider/provider.dart';
-import 'package:dynamic_color/dynamic_color.dart';
-
-import 'l10n/app_localizations.dart';
-import 'services/settings_service.dart';
-import 'services/auth_service.dart';
-import 'services/lsf_scraper_service.dart';
-import 'services/log_service.dart';
-import 'screens/main_screen.dart';
+// The dynamic_color plugin hands out the system palettes as a `CorePalette`,
+// which material_color_utilities has deprecated in favour of the
+// `DynamicScheme` this code feeds it into. There is no other source for it.
+// ignore_for_file: deprecated_member_use
 
 import 'dart:async';
 
-final ValueNotifier<int> mainTabNotifier = ValueNotifier<int>(0);
-final StreamController<int> tabRefreshController = StreamController<int>.broadcast();
-final StreamController<void> emailLongPressController = StreamController<void>.broadcast();
+import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:material_color_utilities/material_color_utilities.dart'
+    show CorePalette;
+import 'package:provider/provider.dart';
+
+import 'l10n/app_localizations.dart';
+import 'screens/main_screen.dart';
+import 'services/auth_service.dart';
+import 'services/cache_service.dart';
+import 'services/log_service.dart';
+import 'services/lsf_scraper_service.dart';
+import 'services/settings_service.dart';
+import 'theme/app_theme.dart';
+import 'theme/system_colors.dart';
+import 'widgets/expressive.dart';
+import 'widgets/splash_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final settings = SettingsService();
-  await settings.loadSettings();
+  // Both share the same SharedPreferences instance, so this is one load.
+  await Future.wait([settings.loadSettings(), CacheService.instance.init()]);
+  unawaited(CacheService.instance.prune());
 
   runApp(
     MultiProvider(
@@ -28,7 +39,9 @@ void main() async {
         ChangeNotifierProvider(create: (_) => LogService()),
         ChangeNotifierProvider.value(value: settings),
         ProxyProvider<LogService, LsfScraperService>(
-          update: (context, logger, _) => LsfScraperService(logger),
+          update: (context, logger, previous) =>
+              previous ?? LsfScraperService(logger),
+          dispose: (_, scraper) => scraper.dispose(),
         ),
         ChangeNotifierProxyProvider2<LsfScraperService, LogService,
             AuthService>(
@@ -45,109 +58,122 @@ void main() async {
   );
 }
 
-class UniweApp extends StatelessWidget {
+class UniweApp extends StatefulWidget {
   const UniweApp({super.key});
 
-  static const _seedColor = Color(0xFF76B900);
+  @override
+  State<UniweApp> createState() => _UniweAppState();
+}
+
+class _UniweAppState extends State<UniweApp> with WidgetsBindingObserver {
+  /// The system's Material You palettes, where the platform has them.
+  CorePalette? _systemPalette;
+
+  /// Whether the animated logo is still over the app.
+  bool _showSplash = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadSystemPalette();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The user may have changed wallpaper or colour style in the meantime.
+    if (state == AppLifecycleState.resumed) _loadSystemPalette();
+  }
+
+  Future<void> _loadSystemPalette() async {
+    CorePalette? palette;
+    try {
+      palette = await DynamicColorPlugin.getCorePalette();
+    } catch (_) {
+      // No dynamic colour on this platform; the brand colours are used.
+    }
+    if (!mounted) return;
+    if (listEquals(palette?.asList(), _systemPalette?.asList())) return;
+    setState(() => _systemPalette = palette);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final auth = context.watch<AuthService>();
+    // Select only what the app shell depends on, so toggling an unrelated
+    // setting does not rebuild MaterialApp and both themes.
+    final useDynamicColor =
+        context.select<SettingsService, bool>((s) => s.useDynamicColor);
+    final amoledTheme =
+        context.select<SettingsService, bool>((s) => s.amoledTheme);
+    final themeMode =
+        context.select<SettingsService, ThemeMode>((s) => s.themeMode);
+    final locale = context.select<SettingsService, Locale>((s) => s.locale);
+    final settingsLoaded =
+        context.select<SettingsService, bool>((s) => s.isLoaded);
+    final isCheckingAuth =
+        context.select<AuthService, bool>((a) => a.isChecking);
 
-    return DynamicColorBuilder(
-      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-        final ColorScheme lightColorScheme;
-        final ColorScheme darkColorScheme;
+    final palette = useDynamicColor ? _systemPalette : null;
 
-        if (settings.useDynamicColor &&
-            lightDynamic != null &&
-            darkDynamic != null) {
-          lightColorScheme = lightDynamic.harmonized();
-          darkColorScheme = darkDynamic.harmonized().copyWith(
-                surface: Color.lerp(darkDynamic.surface, Colors.black, 0.1),
-              );
-        } else {
-          lightColorScheme = ColorScheme.fromSeed(
-            seedColor: _seedColor,
-            brightness: Brightness.light,
-          ).copyWith(primary: _seedColor);
+    final theme = AppTheme.build(AppTheme.colorScheme(
+      brightness: Brightness.light,
+      systemScheme: palette == null
+          ? null
+          : colorSchemeFromSystemPalette(palette, Brightness.light),
+    ));
+    final darkTheme = AppTheme.build(
+      AppTheme.colorScheme(
+        brightness: Brightness.dark,
+        systemScheme: palette == null
+            ? null
+            : colorSchemeFromSystemPalette(palette, Brightness.dark),
+        amoled: amoledTheme,
+      ),
+      amoled: amoledTheme,
+    );
 
-          final baseDark = ColorScheme.fromSeed(
-            seedColor: _seedColor,
-            brightness: Brightness.dark,
-          );
-          darkColorScheme = baseDark.copyWith(
-            primary: _seedColor,
-            surface: Color.lerp(baseDark.surface, Colors.black, 0.1),
-          );
-        }
+    // While restoring the session, show a shell in the correct theme
+    // instead of swapping MaterialApps.
+    final isReady = !isCheckingAuth && settingsLoaded;
+    final Widget home =
+        isReady ? const MainScreen() : const Scaffold(body: LoadingState());
 
-        const appBarTheme = AppBarTheme(
-          surfaceTintColor: Colors.transparent,
-          scrolledUnderElevation: 0.0,
-        );
-
-        final theme = ThemeData(
-          colorScheme: lightColorScheme,
-          useMaterial3: true,
-          fontFamily: 'Inter',
-          appBarTheme: appBarTheme,
-        );
-
-        final darkTheme = ThemeData(
-          colorScheme: settings.amoledTheme
-              ? darkColorScheme.copyWith(
-                  surface: Colors.black,
-                  surfaceContainer: const Color(0xFF121212),
-                  surfaceContainerHigh: const Color(0xFF1A1A1A),
-                  surfaceContainerHighest: const Color(0xFF222222),
-                  surfaceContainerLow: const Color(0xFF0A0A0A),
-                  surfaceContainerLowest: const Color(0xFF050505),
-                )
-              : darkColorScheme,
-          scaffoldBackgroundColor:
-              settings.amoledTheme ? Colors.black : darkColorScheme.surface,
-          useMaterial3: true,
-          fontFamily: 'Inter',
-          appBarTheme: appBarTheme.copyWith(
-            backgroundColor: settings.amoledTheme ? Colors.black : null,
-          ),
-          navigationBarTheme: NavigationBarThemeData(
-            backgroundColor: settings.amoledTheme ? Colors.black : null,
-            indicatorColor: settings.amoledTheme
-                ? darkColorScheme.primary.withValues(alpha: 0.2)
-                : null,
-          ),
-        );
-
-        // While checking auth, show a shell so we don't have a double-MaterialApp rebuild
-        // but ensure it uses the CORRECT theme from the start.
-        final Widget home;
-        if (auth.isChecking || !settings.isLoaded) {
-          home =
-              const Scaffold(body: Center(child: CircularProgressIndicator()));
-        } else {
-          home = const MainScreen();
-        }
-
-        return MaterialApp(
-          title: 'Uniwe',
-          debugShowCheckedModeBanner: false,
-          themeMode: settings.themeMode,
-          theme: theme,
-          darkTheme: darkTheme,
-          locale: settings.locale,
-          supportedLocales: const [Locale('en'), Locale('de')],
-          localizationsDelegates: const [
-            AppLocalizationsDelegate(),
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          home: home,
-        );
-      },
+    return MaterialApp(
+      title: 'Uniwe',
+      debugShowCheckedModeBanner: false,
+      themeMode: themeMode,
+      theme: theme,
+      darkTheme: darkTheme,
+      locale: locale,
+      supportedLocales: const [Locale('en'), Locale('de')],
+      localizationsDelegates: const [
+        AppLocalizationsDelegate(),
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: home,
+      // The Stack stays after the splash is gone, so the navigator below it
+      // keeps its place in the tree (and its state).
+      builder: (context, child) => Stack(
+        fit: StackFit.expand,
+        children: [
+          child ?? const SizedBox.shrink(),
+          if (_showSplash)
+            Positioned.fill(
+              child: SplashOverlay(
+                ready: isReady,
+                onFinished: () => setState(() => _showSplash = false),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -1,301 +1,421 @@
+import 'dart:async';
+import 'dart:developer';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/settings_service.dart';
-import '../services/mensa_service.dart';
-import '../services/haptic_service.dart';
-import '../services/cache_service.dart';
+
+import '../app_events.dart';
+import '../l10n/app_localizations.dart';
+import '../models/mensa_category.dart';
 import '../models/mensa_meal.dart';
-import 'package:intl/intl.dart';
-import 'dart:async';
-import '../main.dart' as import_main;
+import '../services/cache_service.dart';
+import '../services/haptic_service.dart';
+import '../services/mensa_service.dart';
+import '../services/settings_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/formats.dart';
+import '../utils/iso_week.dart';
+import '../widgets/app_sheet.dart';
+import '../widgets/expressive.dart';
 
 class MensaScreen extends StatefulWidget {
-  const MensaScreen({super.key});
+  const MensaScreen({super.key, this.service});
+
+  /// Injectable for tests.
+  final MensaService? service;
 
   @override
   State<MensaScreen> createState() => _MensaScreenState();
 }
 
 class _MensaScreenState extends State<MensaScreen> {
-  final MensaService _mensaService = MensaService();
-  late PageController _pageController;
-  final ScrollController _dayScrollController = ScrollController();
-  
-  List<String> _availableDays = [];
-  bool _isLoadingDays = true;
-  String? _selectedDate;
-  
-  // Cache meals to prevent re-fetching on rapid swipes
-  Map<String, List<MensaMeal>> _mealsCache = {};
-  bool _isLoadingMeals = false;
+  static const Duration _freshFor = Duration(minutes: 15);
+  static const double _dayPillWidth = 56;
+  static const double _dayPillGap = 8;
+  static const double _dayStripPadding = 12;
 
-  bool _networkFailed = false;
+  late final MensaService _service = widget.service ?? MensaService();
+  late final SettingsService _settings;
+  final ScrollController _dayScrollController = ScrollController();
+  PageController _pageController = PageController();
+
+  int _canteenId = -1;
+
+  /// Bumped whenever the canteen changes; responses of older requests are
+  /// dropped instead of being shown for the wrong canteen.
+  int _generation = 0;
+
+  List<String> _days = const [];
+  int _selectedIndex = 0;
+  bool _loadingDays = true;
+  bool _daysFailed = false;
+
+  final Map<String, List<MensaMeal>> _meals = {};
+  final Map<String, DateTime> _mealsFetchedAt = {};
+  final Set<String> _loadingMeals = {};
+  final Set<String> _failedMeals = {};
+
+  /// The last refresh failed and the screen shows cached data.
+  bool _offline = false;
   DateTime? _lastFetched;
 
-  int _cachedCanteenId = -1;
-
-  StreamSubscription<int>? _tabRefreshSubscription;
+  StreamSubscription<int>? _reselectSubscription;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
-    
-    _tabRefreshSubscription = import_main.tabRefreshController.stream.listen((index) {
-      if (index == 1 && mounted) {
-        final haptics = context.read<SettingsService>().hapticsEnabled;
-        HapticService.confirm(haptics);
-        if (_selectedDate != null) {
-          _loadMeals(_selectedDate!);
-        } else {
-          _loadDays();
-        }
+    _settings = context.read<SettingsService>();
+    _settings.addListener(_onSettingsChanged);
+
+    _reselectSubscription = AppEvents.tabReselected.listen((index) {
+      if (index == AppTab.mensa && mounted) {
+        HapticService.confirm(_settings.hapticsEnabled);
+        _refresh();
       }
     });
-  }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final canteenId = context.read<SettingsService>().canteenId;
-    if (canteenId != _cachedCanteenId) {
-      _cachedCanteenId = canteenId;
-      _loadDays();
-    }
+    _loadDays();
   }
 
   @override
   void dispose() {
-    _tabRefreshSubscription?.cancel();
+    _reselectSubscription?.cancel();
+    _settings.removeListener(_onSettingsChanged);
     _pageController.dispose();
     _dayScrollController.dispose();
-    _mensaService.dispose();
+    if (widget.service == null) _service.dispose();
     super.dispose();
   }
 
-  Future<void> _loadDays() async {
+  void _onSettingsChanged() {
+    if (_settings.canteenId != _canteenId) _loadDays();
+  }
+
+  String? get _selectedDate =>
+      _selectedIndex < _days.length ? _days[_selectedIndex] : null;
+
+  bool _isFresh(DateTime? timestamp) =>
+      timestamp != null &&
+      DateTime.now().difference(timestamp).abs() < _freshFor;
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+
+  /// Loads the open days of the current canteen. Cached days are shown
+  /// immediately; the network is only asked when they are not fresh.
+  Future<void> _loadDays({bool force = false}) async {
+    final canteenChanged = _settings.canteenId != _canteenId;
+    if (canteenChanged) _generation++;
+    final generation = _generation;
+    final canteenId = _canteenId = _settings.canteenId;
+
+    final cache = CacheService.instance;
+    final cacheKey = CacheService.mensaDaysKey(canteenId);
+    final cached = cache.read(cacheKey);
+    final cachedDays = _decodeDays(cached.data);
+    final cachedAt = cached.timestamp;
+    final cacheIsFromToday =
+        cachedDays != null && cachedAt != null && cache.isSameDay(cachedAt);
+
     setState(() {
-      _isLoadingDays = true;
-      _mealsCache = {};
-      _availableDays = [];
+      if (canteenChanged) {
+        _meals.clear();
+        _mealsFetchedAt.clear();
+        _loadingMeals.clear();
+        _failedMeals.clear();
+        _days = const [];
+        _selectedIndex = 0;
+        _offline = false;
+        _lastFetched = null;
+      }
+      _daysFailed = false;
+      if (_days.isEmpty && cacheIsFromToday) {
+        _applyDays(cachedDays);
+        _lastFetched = cachedAt;
+      }
+      _loadingDays = _days.isEmpty;
     });
 
-    final cacheKey = CacheService.mensaDaysKey(_cachedCanteenId);
-    final cache = CacheService.instance;
+    if (!force && cacheIsFromToday && _isFresh(cachedAt)) {
+      setState(() => _loadingDays = false);
+      final date = _selectedDate;
+      if (date != null) unawaited(_loadMeals(date));
+      return;
+    }
 
-    final cached = await cache.load(cacheKey);
-    final cachedTs = cached.timestamp;
-    final isCacheFresh = cachedTs != null && cache.isSameDay(cachedTs);
-
-    void applyDays(List<String> days, DateTime ts) {
-      if (!mounted) return;
+    try {
+      final days = await _service.fetchDays(canteenId);
+      if (!mounted || generation != _generation) return;
+      unawaited(cache.save(cacheKey, days));
       setState(() {
-        _availableDays = days;
-        _isLoadingDays = false;
-        _lastFetched = ts;
-        
-        if (days.isNotEmpty) {
-          final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-          int targetIdx = days.indexOf(todayStr);
-          if (targetIdx == -1) targetIdx = 0;
-
-          _selectedDate = days[targetIdx];
-          
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_pageController.hasClients) {
-              _pageController.jumpToPage(targetIdx);
-            }
-          });
-
-          _loadMeals(_selectedDate!);
+        _applyDays(days);
+        _loadingDays = false;
+        _offline = false;
+        _lastFetched = DateTime.now();
+      });
+    } catch (e) {
+      log('MensaScreen: loading days failed: $e');
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _loadingDays = false;
+        if (_days.isEmpty && cachedDays != null) {
+          // Older than today, but better than nothing while offline.
+          final today = Formats.isoDate(DateTime.now());
+          _applyDays(
+            cachedDays.where((d) => d.compareTo(today) >= 0).toList(),
+          );
+          _lastFetched = cachedAt;
+        }
+        if (_days.isEmpty) {
+          _daysFailed = true;
+        } else {
+          _offline = true;
         }
       });
     }
 
-    if (isCacheFresh && cached.data != null) {
-      final days = List<String>.from(cached.data as List);
-      applyDays(days, cachedTs);
-      
-      final stale = DateTime.now().difference(cachedTs).inMinutes >= 15;
-      if (!stale) return; // Still fresh, don't re-fetch
-    }
-
-    final days = await _mensaService.fetchDays(_cachedCanteenId);
-    
-    if (days.isNotEmpty) {
-      await cache.save(cacheKey, days);
-      setState(() => _networkFailed = false);
-      applyDays(days, DateTime.now());
-    } else if (cached.data != null) {
-      // Network failed, fallback unconditionally
-      final cachedDays = List<String>.from(cached.data as List);
-      setState(() => _networkFailed = true);
-      applyDays(cachedDays, cachedTs!);
-    } else {
-      if (mounted) setState(() { _isLoadingDays = false; _networkFailed = true; });
-    }
+    final date = _selectedDate;
+    if (date != null) unawaited(_loadMeals(date, force: force));
   }
 
-  Future<void> _loadMeals(String date) async {
-    if (_mealsCache.containsKey(date) && _mealsCache[date]!.isNotEmpty) {
-       setState(() { _selectedDate = date; });
-       return; 
+  /// Replaces the list of days, keeping the selected date when it still
+  /// exists and defaulting to today otherwise. Must run inside `setState`.
+  void _applyDays(List<String> days) {
+    if (listEquals(days, _days)) return;
+
+    final previous = _selectedDate;
+    var index = previous != null ? days.indexOf(previous) : -1;
+    if (index == -1) index = days.indexOf(Formats.isoDate(DateTime.now()));
+    if (index == -1) index = 0;
+
+    _days = days;
+    _selectedIndex = index;
+
+    // A PageController's initial page is fixed, so the pager gets a new one.
+    final old = _pageController;
+    _pageController = PageController(initialPage: index);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      old.dispose();
+      _scrollDayIntoView(index, animate: false);
+    });
+  }
+
+  Future<void> _loadMeals(String date, {bool force = false}) async {
+    if (_loadingMeals.contains(date)) return;
+    if (!force && !_failedMeals.contains(date) && _isFresh(_mealsFetchedAt[date])) {
+      return;
+    }
+
+    final generation = _generation;
+    final canteenId = _canteenId;
+    final cache = CacheService.instance;
+    final cacheKey = CacheService.mensaKey(canteenId, date);
+    final cached = cache.read(cacheKey);
+    final cachedMeals = _decodeMeals(cached.data);
+    final cachedAt = cached.timestamp;
+
+    if (_meals[date] == null &&
+        cachedMeals != null &&
+        cachedAt != null &&
+        cache.isSameDay(cachedAt)) {
+      _meals[date] = cachedMeals;
+      _mealsFetchedAt[date] = cachedAt;
+      if (!force && _isFresh(cachedAt)) {
+        setState(() => _failedMeals.remove(date));
+        return;
+      }
     }
 
     setState(() {
-      _isLoadingMeals = true;
-      _selectedDate = date;
+      _loadingMeals.add(date);
+      _failedMeals.remove(date);
     });
 
-    final cacheKey = CacheService.mensaKey(_cachedCanteenId, date);
-    final cache = CacheService.instance;
-
-    final cached = await cache.load(cacheKey);
-    final cachedTs = cached.timestamp;
-    final isCacheFresh = cachedTs != null && cache.isSameDay(cachedTs);
-
-    void applyMeals(List<MensaMeal> meals, DateTime ts) {
-      if (!mounted) return;
+    try {
+      final meals = await _service.fetchMeals(canteenId, date);
+      if (!mounted || generation != _generation) return;
+      unawaited(cache.save(cacheKey, meals.map((m) => m.toJson()).toList()));
       setState(() {
-        _mealsCache[date] = meals;
-        _isLoadingMeals = false;
-        _lastFetched = ts;
+        _meals[date] = meals;
+        _mealsFetchedAt[date] = DateTime.now();
+        _loadingMeals.remove(date);
+        _offline = false;
+        _lastFetched = DateTime.now();
       });
-    }
-
-    if (isCacheFresh && cached.data != null) {
-       final meals = (cached.data as List).map((m) => MensaMeal.fromJson(Map<String, dynamic>.from(m))).toList();
-       applyMeals(meals, cachedTs);
-       
-       final stale = DateTime.now().difference(cachedTs).inMinutes >= 15;
-       if (!stale) return;
-    }
-
-    final meals = await _mensaService.fetchMeals(_cachedCanteenId, date);
-
-    if (meals.isNotEmpty) {
-      await cache.save(cacheKey, meals.map((m) => m.toJson()).toList());
-      setState(() => _networkFailed = false);
-      applyMeals(meals, DateTime.now());
-    } else if (cached.data != null) {
-      final cachedMeals = (cached.data as List).map((m) => MensaMeal.fromJson(Map<String, dynamic>.from(m))).toList();
-      setState(() => _networkFailed = true);
-      applyMeals(cachedMeals, cachedTs!);
-    } else {
-      if (mounted) setState(() { _isLoadingMeals = false; _networkFailed = true; });
+    } catch (e) {
+      log('MensaScreen: loading meals for $date failed: $e');
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _loadingMeals.remove(date);
+        if (_meals[date] == null && cachedMeals != null) {
+          _meals[date] = cachedMeals;
+          if (cachedAt != null) _lastFetched = cachedAt;
+        }
+        if (_meals[date] == null) {
+          _failedMeals.add(date);
+        } else {
+          _offline = true;
+        }
+      });
     }
   }
 
+  Future<void> _refresh() async {
+    if (_days.isEmpty) {
+      await _loadDays(force: true);
+      return;
+    }
+    final date = _selectedDate;
+    if (date != null) await _loadMeals(date, force: true);
+  }
+
+  static List<String>? _decodeDays(Object? data) {
+    if (data is! List) return null;
+    return data.map((d) => d.toString()).toList();
+  }
+
+  static List<MensaMeal>? _decodeMeals(Object? data) {
+    if (data is! List) return null;
+    try {
+      return data
+          .map((m) => MensaMeal.fromJson(Map<String, dynamic>.from(m as Map)))
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Day selection ─────────────────────────────────────────────────────────
+
+  void _onPageChanged(int index) {
+    if (index >= _days.length) return;
+    HapticService.selection(_settings.hapticsEnabled);
+    setState(() => _selectedIndex = index);
+    _scrollDayIntoView(index);
+    _loadMeals(_days[index]);
+  }
+
+  void _onDayTapped(int index) {
+    if (index == _selectedIndex || !_pageController.hasClients) return;
+    if (_settings.animationsEnabled) {
+      _pageController.animateToPage(
+        index,
+        duration: Durations.medium2,
+        curve: Easing.emphasizedDecelerate,
+      );
+    } else {
+      _pageController.jumpToPage(index);
+    }
+  }
+
+  /// Scrolls the day strip so the chip at [index] is centered.
+  void _scrollDayIntoView(int index, {bool animate = true}) {
+    if (!_dayScrollController.hasClients) return;
+    final position = _dayScrollController.position;
+    const extent = _dayPillWidth + _dayPillGap;
+    final target = (_dayStripPadding +
+            index * extent +
+            _dayPillWidth / 2 -
+            position.viewportDimension / 2)
+        .clamp(0.0, position.maxScrollExtent);
+
+    if (animate && _settings.animationsEnabled) {
+      _dayScrollController.animateTo(
+        target,
+        duration: Durations.medium2,
+        curve: Easing.standard,
+      );
+    } else {
+      _dayScrollController.jumpTo(target);
+    }
+  }
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    // No global watches needed here as they are handled in sub-methods
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      body: NestedScrollView(
-        headerSliverBuilder: (BuildContext context, bool innerBoxIsScrolled) {
-          return <Widget>[
-            SliverAppBar(
-              title: const Text('Mensa'),
-              centerTitle: true,
-              floating: true,
-              snap: true,
-              actions: [
-                if (_networkFailed && _lastFetched != null && DateTime.now().difference(_lastFetched!).inMinutes > 30)
-                  Tooltip(
-                    message: 'Zuletzt aktualisiert: ${DateFormat('HH:mm').format(_lastFetched!)}',
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: Icon(
-                        Icons.cloud_off_outlined,
-                        size: 20,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-              ],
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(70),
-                child: _buildDayPaginator(),
+      appBar: AppBar(
+        title: Text(l10n.get('mensa')),
+        actions: [
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 16),
+            child: Center(
+              child: Tooltip(
+                message: _canteenId == 2036
+                    ? 'Mensa Treskowallee'
+                    : 'Mensa Wilhelminenhof',
+                triggerMode: TooltipTriggerMode.tap,
+                child: TonalPill(
+                  label: _canteenId == 2036 ? 'Mensa TA' : 'Mensa WH',
+                  icon: Icons.location_on_outlined,
+                  background: scheme.secondaryContainer,
+                  foreground: scheme.onSecondaryContainer,
+                ),
               ),
             ),
-          ];
-        },
-        body: _buildBody(),
+          ),
+        ],
+        bottom: _days.isEmpty
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(
+                  DayPill.height + 16 + _DietFilterBar.height,
+                ),
+                child: Column(
+                  children: [_buildDayStrip(), const _DietFilterBar()],
+                ),
+              ),
+      ),
+      body: Column(
+        children: [
+          if (_offline)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: InfoBanner(
+                icon: Icons.cloud_off_outlined,
+                text: _lastFetched == null
+                    ? l10n.get('offlineCache')
+                    : '${l10n.get('offlineCache')} '
+                        '${l10n.get('lastUpdated')}: ${Formats.timestamp(_lastFetched!)}',
+              ),
+            ),
+          Expanded(child: _buildBody(l10n)),
+        ],
       ),
     );
   }
 
-  Widget _buildDayPaginator() {
-    if (_isLoadingDays) {
-      return const SizedBox(
-         height: 70, 
-         child: Center(child: CircularProgressIndicator())
-      );
-    }
-    
-    if (_availableDays.isEmpty) {
-      return const SizedBox(height: 70);
-    }
+  Widget _buildDayStrip() {
+    final locale = Localizations.localeOf(context).languageCode;
+    final today = Dates.today();
+    final animate =
+        context.select<SettingsService, bool>((s) => s.animationsEnabled);
 
     return SizedBox(
-      height: 70,
-      child: ListView.builder(
+      height: DayPill.height + 16,
+      child: ListView.separated(
         controller: _dayScrollController,
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemCount: _availableDays.length,
+        padding: const EdgeInsets.fromLTRB(
+            _dayStripPadding, 4, _dayStripPadding, 12),
+        itemCount: _days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: _dayPillGap),
         itemBuilder: (context, index) {
-          final dateStr = _availableDays[index];
-          final dateObj = DateTime.parse(dateStr);
-          final isSelected = dateStr == _selectedDate;
-          final isToday = dateObj.day == DateTime.now().day && dateObj.month == DateTime.now().month && dateObj.year == DateTime.now().year;
-
-          return GestureDetector(
-            onTap: () {
-              if (!isSelected) {
-                 final hapticsEnabled = context.read<SettingsService>().hapticsEnabled;
-                 HapticService.selection(hapticsEnabled);
-                 _pageController.animateToPage(index, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
-              }
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
-              width: 65,
-              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected 
-                    ? Theme.of(context).colorScheme.primary 
-                    : Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: isSelected 
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.2),
-                  width: isToday ? 2 : 1,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 250),
-                    style: Theme.of(context).textTheme.labelSmall!.copyWith(
-                      color: isSelected ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    child: Text(DateFormat('E', 'de').format(dateObj)),
-                  ),
-                  const SizedBox(height: 2),
-                  AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 250),
-                    style: Theme.of(context).textTheme.titleMedium!.copyWith(
-                      color: isSelected ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurface,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    child: Text(dateObj.day.toString()),
-                  ),
-                ],
-              ),
+          final date = DateTime.tryParse(_days[index]) ?? today;
+          return SizedBox(
+            width: _dayPillWidth,
+            child: DayPill(
+              weekday: Formats.weekdayShort(date, locale),
+              day: date.day.toString(),
+              selected: index == _selectedIndex,
+              isToday: Dates.isSameDay(date, today),
+              semanticLabel: Formats.fullDate(date, locale),
+              animate: animate,
+              onTap: () => _onDayTapped(index),
             ),
           );
         },
@@ -303,297 +423,469 @@ class _MensaScreenState extends State<MensaScreen> {
     );
   }
 
-  /// Scrolls the horizontal day chip list so the chip at [index] is centered.
-  void _scrollDayChipIntoView(int index) {
-    if (!_dayScrollController.hasClients) return;
-    // Each chip is 65px wide + 8px total horizontal margin = 73px per item + 12px list padding
-    const double itemWidth = 73.0;
-    const double listPadding = 12.0;
-    final viewportWidth = _dayScrollController.position.viewportDimension;
-    final maxScroll = _dayScrollController.position.maxScrollExtent;
-
-    // Target: center the chip in the viewport
-    double targetOffset = (index * itemWidth + listPadding) - (viewportWidth / 2) + (itemWidth / 2);
-    targetOffset = targetOffset.clamp(0.0, maxScroll);
-
-    _dayScrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoadingDays && _availableDays.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_availableDays.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.restaurant_menu, size: 64, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 16),
-            Text('Mensa geschlossen!', style: Theme.of(context).textTheme.titleLarge),
-          ],
+  Widget _buildBody(AppLocalizations l10n) {
+    if (_days.isEmpty) {
+      if (_loadingDays) return const LoadingState();
+      if (_daysFailed) {
+        return StatusMessage(
+          icon: Icons.cloud_off_outlined,
+          shape: SoftShape.clover,
+          title: l10n.get('errorMensa'),
+          action: FilledButton.tonalIcon(
+            onPressed: () {
+              HapticService.confirm(_settings.hapticsEnabled);
+              _loadDays(force: true);
+            },
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(l10n.get('retry')),
+          ),
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: StatusMessage(
+          icon: Icons.restaurant_menu_rounded,
+          shape: SoftShape.flower,
+          title: l10n.get('mensaClosed'),
+          message: l10n.get('mensaClosedHint'),
         ),
       );
     }
 
     return PageView.builder(
+      key: ObjectKey(_pageController),
       controller: _pageController,
-      onPageChanged: (index) {
-        final settings = context.read<SettingsService>();
-        HapticService.selection(settings.hapticsEnabled);
-        final newDate = _availableDays[index];
-        _loadMeals(newDate);
-        _scrollDayChipIntoView(index);
-      },
-      itemCount: _availableDays.length,
-      itemBuilder: (context, index) {
-        final date = _availableDays[index];
-        final list = _mealsCache[date];
-        
-        if (list == null || (_isLoadingMeals && list.isEmpty && _selectedDate == date)) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (list.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.no_meals, size: 64, color: Theme.of(context).colorScheme.outline),
-                const SizedBox(height: 16),
-                Text('Keine Speisen gefunden.', style: Theme.of(context).textTheme.titleMedium),
-              ],
-            )
-          );
-        }
-
-        Map<String, List<MensaMeal>> categorized = {};
-        for (var m in list) {
-           categorized.putIfAbsent(m.category, () => []).add(m);
-        }
-
-        // Sort categories using user's saved order, falling back to default
-        final settings = context.read<SettingsService>();
-        final priceKey = settings.mensaPriceCategory;
-        final isCompact = settings.compactMensaView;
-        final userOrder = settings.mensaCategoryOrder;
-        
-        final defaultOrder = {
-          'Essen': 0, 'Hauptgericht': 0, 'essen': 0,
-          'Beilage': 1, 'Beilagen': 1, 'beilagen': 1,
-          'Suppe': 2, 'Suppen': 2, 'suppen': 2,
-          'Salat': 3, 'Salate': 3, 'salat': 3,
-          'Dessert': 4, 'Desserts': 4, 'dessert': 4,
-          'Aktionen': 5, 'aktionen': 5,
-          'Vorspeisen': 6, 'vorspeisen': 6, 'Vorspeise': 6,
-        };
-
-        int getOrder(String cat) {
-          if (userOrder.isNotEmpty) {
-            for (int i = 0; i < userOrder.length; i++) {
-              if (cat.toLowerCase().startsWith(userOrder[i].toLowerCase())) return i;
-            }
-          }
-          return defaultOrder[cat] ?? 99;
-        }
-
-        final sortedKeys = categorized.keys.toList()
-          ..sort((a, b) => getOrder(a).compareTo(getOrder(b)));
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: sortedKeys.length,
-          itemBuilder: (context, idx) {
-            String cat = sortedKeys[idx];
-            List<MensaMeal> catMeals = categorized[cat]!;
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 20, bottom: 8, left: 4),
-                  child: Text(
-                    cat, 
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.primary, 
-                      fontWeight: FontWeight.bold
-                    )
-                  ),
-                ),
-                ...catMeals.map((m) => isCompact ? _buildCompactMealCard(m, priceKey) : _buildMealCard(m, priceKey)),
-              ],
-            );
-          },
-        );
-      },
+      onPageChanged: _onPageChanged,
+      itemCount: _days.length,
+      itemBuilder: (context, index) => _buildMealsPage(l10n, _days[index]),
     );
   }
 
-  Widget _buildMealCard(MensaMeal meal, String priceKey) {
-    final isVegan = meal.isVegan;
-    final isVeggie = meal.isVegetarian;
+  Widget _buildMealsPage(AppLocalizations l10n, String date) {
+    final meals = _meals[date];
 
+    if (meals == null) {
+      if (_failedMeals.contains(date)) {
+        return StatusMessage(
+          icon: Icons.cloud_off_outlined,
+          shape: SoftShape.clover,
+          title: l10n.get('errorMensa'),
+          action: FilledButton.tonalIcon(
+            onPressed: () {
+              HapticService.confirm(_settings.hapticsEnabled);
+              _loadMeals(date, force: true);
+            },
+            icon: const Icon(Icons.refresh_rounded),
+            label: Text(l10n.get('retry')),
+          ),
+        );
+      }
+      return const LoadingState();
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _loadMeals(date, force: true),
+      child: meals.isEmpty
+          ? StatusMessage(
+              icon: Icons.no_meals_outlined,
+              shape: SoftShape.flower,
+              title: l10n.get('noMeals'),
+            )
+          : _MealList(meals: meals),
+    );
+  }
+}
+
+/// The menu of one day, grouped by category in the user's preferred order.
+class _MealList extends StatelessWidget {
+  const _MealList({required this.meals});
+
+  final List<MensaMeal> meals;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final priceKey =
+        context.select<SettingsService, String>((s) => s.mensaPriceCategory);
+    final compact =
+        context.select<SettingsService, bool>((s) => s.compactView);
+    final savedOrder = context
+        .select<SettingsService, List<String>>((s) => s.mensaCategoryOrder);
+    final hapticsEnabled =
+        context.select<SettingsService, bool>((s) => s.hapticsEnabled);
+    final dietFilters = context
+        .select<SettingsService, Set<String>>((s) => s.mensaDietFilters);
+
+    final visible = meals.where((m) => m.matchesDiet(dietFilters)).toList();
+    if (visible.isEmpty) {
+      return StatusMessage(
+        icon: Icons.filter_alt_off_outlined,
+        shape: SoftShape.flower,
+        title: l10n.get('noMealsForFilter'),
+        action: FilledButton.tonal(
+          onPressed: () {
+            final settings = context.read<SettingsService>();
+            HapticService.selection(settings.hapticsEnabled);
+            settings.setMensaDietFilters(const {});
+          },
+          child: Text(l10n.get('clearFilters')),
+        ),
+      );
+    }
+
+    // Group by API category, then order the groups: known categories by the
+    // user's order, unknown ones afterwards in the order the API sent them.
+    final order = MensaCategory.ordered(savedOrder);
+    final groups = <String, List<MensaMeal>>{};
+    for (final meal in visible) {
+      groups.putIfAbsent(meal.category, () => []).add(meal);
+    }
+    final names = groups.keys.toList();
+    int rank(String name) {
+      final known = MensaCategory.match(name);
+      return known == null ? order.length : order.indexOf(known);
+    }
+
+    final sorted = List<int>.generate(names.length, (i) => i)
+      ..sort((a, b) {
+        final byRank = rank(names[a]).compareTo(rank(names[b]));
+        return byRank != 0 ? byRank : a.compareTo(b);
+      });
+
+    final rows = <Widget>[];
+    for (final i in sorted) {
+      final name = names[i];
+      final known = MensaCategory.match(name);
+      rows.add(SectionHeader(
+        known?.label(german: l10n.isGerman) ?? name,
+        icon: known?.icon ?? Icons.restaurant_rounded,
+      ));
+      for (final meal in groups[name]!) {
+        rows.add(Padding(
+          padding: EdgeInsets.only(bottom: compact ? 6 : 10),
+          child: _MealCard(
+            meal: meal,
+            priceKey: priceKey,
+            compact: compact,
+            onTap: () {
+              HapticService.confirm(hapticsEnabled);
+              _showMealDetails(context, meal, priceKey);
+            },
+          ),
+        ));
+      }
+    }
+
+    final gutter = AppSpacing.gutter(context);
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(
+          gutter, 0, gutter, AppSpacing.bottomInset(context)),
+      itemCount: rows.length,
+      itemBuilder: (context, index) => rows[index],
+    );
+  }
+}
+
+/// Diet filter chips under the day strip. Several can be active at once.
+class _DietFilterBar extends StatelessWidget {
+  const _DietFilterBar();
+
+  static const double height = 48;
+
+  static const List<(String, IconData)> _filters = [
+    ('vegetarian', Icons.eco_outlined),
+    ('vegan', Icons.spa_outlined),
+    ('meat', Icons.kebab_dining_outlined),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final active = context
+        .select<SettingsService, Set<String>>((s) => s.mensaDietFilters);
+
+    return SizedBox(
+      height: height,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        itemCount: _filters.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final (key, icon) = _filters[index];
+          final selected = active.contains(key);
+          return FilterChip(
+            label: Text(l10n.get(key)),
+            avatar: selected ? null : Icon(icon, size: 18),
+            selected: selected,
+            onSelected: (_) {
+              final settings = context.read<SettingsService>();
+              HapticService.selection(settings.hapticsEnabled);
+              settings.toggleMensaDietFilter(key);
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DietPill extends StatelessWidget {
+  const _DietPill({required this.meal, this.dense = false});
+
+  final MensaMeal meal;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final semantic = SemanticColors.of(context);
+    return TonalPill(
+      dense: dense,
+      label: l10n.get(meal.isVegan ? 'vegan' : 'vegetarian'),
+      icon: meal.isVegan ? Icons.spa_outlined : Icons.eco_outlined,
+      background: semantic.successContainer,
+      foreground: semantic.onSuccessContainer,
+    );
+  }
+}
+
+class _MealCard extends StatelessWidget {
+  const _MealCard({
+    required this.meal,
+    required this.priceKey,
+    required this.compact,
+    required this.onTap,
+  });
+
+  static const int _maxNotes = 3;
+
+  final MensaMeal meal;
+  final String priceKey;
+  final bool compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final locale = Localizations.localeOf(context).languageCode;
     final price = meal.prices[priceKey];
+    final hasDiet = meal.isVegan || meal.isVegetarian;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final pricePill = price == null
+        ? null
+        : TonalPill(
+            label: Formats.price(price, locale),
+            background: scheme.primaryContainer,
+            foreground: scheme.onPrimaryContainer,
+            textStyle: theme.textTheme.titleSmall,
+          );
+
+    if (compact) {
+      return Card(
+        shape: const RoundedRectangleBorder(
+          borderRadius: AppShapes.largeRadius,
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    meal.name,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        meal.name,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (hasDiet || meal.noteCodes.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        // Diet tag, then allergens/additives by number only;
+                        // the full names are one tap away in the details.
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (hasDiet) _DietPill(meal: meal, dense: true),
+                            if (meal.noteCodes.isNotEmpty)
+                              Text(
+                                meal.noteCodes.join(' · '),
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (price != null) ...[
+                if (pricePill != null) ...[
                   const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  pricePill,
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final notes = meal.displayNotes;
+    final hiddenNotes = notes.length - _maxNotes;
+
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
                     child: Text(
-                      '€${price.toStringAsFixed(2)}',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      meal.name,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: scheme.onSurface,
                       ),
                     ),
                   ),
-                ]
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (isVegan) _buildTag('Vegan', Colors.green, isProminent: true),
-                if (!isVegan && isVeggie) _buildTag('Vegetarisch', Colors.lightGreen, isProminent: true),
-                ...meal.notes
-                    .where((n) => !n.toLowerCase().contains('vegan') && !n.toLowerCase().contains('vegetarisch') && !n.toLowerCase().contains('ovo-lacto'))
-                    .take(3)
-                    .map((n) => _buildTag(n, Theme.of(context).colorScheme.outlineVariant)),
-              ],
-            )
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCompactMealCard(MensaMeal meal, String priceKey) {
-    final isVegan = meal.isVegan;
-    final isVeggie = meal.isVegetarian;
-    final price = meal.prices[priceKey];
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 6),
-      elevation: 0,
-      color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.4),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    meal.name,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSecondaryContainer,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (isVegan) _buildMiniTag('Vegan', Colors.green, isProminent: true),
-                      if (!isVegan && isVeggie) _buildMiniTag('Veggie', Colors.lightGreen, isProminent: true),
-                    ],
-                  ),
+                  if (pricePill != null) ...[
+                    const SizedBox(width: 12),
+                    pricePill,
+                  ],
                 ],
               ),
-            ),
-            if (price != null)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(10),
+              if (hasDiet || notes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (hasDiet) _DietPill(meal: meal),
+                    for (final note in notes.take(_maxNotes))
+                      TonalPill(
+                        label: note,
+                        background: scheme.surfaceContainerHighest,
+                        foreground: scheme.onSurfaceVariant,
+                      ),
+                    if (hiddenNotes > 0)
+                      TonalPill(
+                        label: '+$hiddenNotes',
+                        background: scheme.surfaceContainerHighest,
+                        foreground: scheme.onSurfaceVariant,
+                      ),
+                  ],
                 ),
-                child: Text(
-                  '€${price.toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Everything known about a meal: all price groups and every label, which
+/// the cards have to truncate.
+void _showMealDetails(BuildContext context, MensaMeal meal, String priceKey) {
+  showAppSheet<void>(
+    context,
+    builder: (context) {
+      final theme = Theme.of(context);
+      final scheme = theme.colorScheme;
+      final l10n = AppLocalizations.of(context);
+      final locale = Localizations.localeOf(context).languageCode;
+      final notes = meal.displayNotes;
+
+      const priceGroups = [
+        ('students', 'priceStudents'),
+        ('employees', 'priceEmployees'),
+        ('others', 'priceGuests'),
+      ];
+      final prices = [
+        for (final (key, label) in priceGroups)
+          if (meal.prices[key] != null) (key, label, meal.prices[key]!),
+      ];
+
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(meal.name, style: theme.textTheme.headlineSmall),
+              if (meal.isVegan || meal.isVegetarian) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: _DietPill(meal: meal),
+                ),
+              ],
+              if (prices.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                ListGroup(
+                  children: [
+                    for (final (key, label, price) in prices)
+                      ListTile(
+                        dense: true,
+                        title: Text(l10n.get(label)),
+                        selected: key == priceKey,
+                        trailing: Text(
+                          Formats.price(price, locale),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: key == priceKey
+                                ? scheme.primary
+                                : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  l10n.get('mealNotes'),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: scheme.primary,
                   ),
                 ),
-              ),
-          ],
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final note in notes)
+                      TonalPill(
+                        label: note,
+                        background: scheme.surfaceContainerHighest,
+                        foreground: scheme.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildMiniTag(String text, Color baseColor, {bool isProminent = false}) {
-    final double scale = isProminent ? 1.25 : 1.0;
-    return Container(
-      margin: const EdgeInsets.only(right: 4),
-      padding: EdgeInsets.symmetric(horizontal: 6 * scale, vertical: 2 * scale),
-      decoration: BoxDecoration(
-        color: baseColor.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(6 * scale),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 9 * scale,
-          color: baseColor,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTag(String text, Color baseColor, {bool isProminent = false}) {
-    final double scale = isProminent ? 1.25 : 1.0;
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8 * scale, vertical: 4 * scale),
-      decoration: BoxDecoration(
-        color: baseColor.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(8 * scale),
-        border: Border.all(color: baseColor.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10 * scale,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
+      );
+    },
+  );
 }

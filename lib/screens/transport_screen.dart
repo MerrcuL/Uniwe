@@ -1,123 +1,205 @@
 import 'dart:async';
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 
-import '../services/settings_service.dart';
-import '../services/transport_service.dart';
+import '../app_events.dart';
+import '../l10n/app_localizations.dart';
 import '../models/transport_arrival.dart';
 import '../services/haptic_service.dart';
-import '../l10n/app_localizations.dart';
-import '../main.dart' as import_main;
+import '../services/settings_service.dart';
+import '../services/transport_service.dart';
+import '../theme/app_theme.dart';
+import '../utils/formats.dart';
+import '../widgets/expressive.dart';
 
 class TransportScreen extends StatefulWidget {
-  const TransportScreen({super.key});
+  const TransportScreen({super.key, this.service});
+
+  /// Injectable for tests.
+  final TransportService? service;
 
   @override
   State<TransportScreen> createState() => _TransportScreenState();
 }
 
-class _TransportScreenState extends State<TransportScreen> {
-  final TransportService _transportService = TransportService();
-  
-  List<TransportArrival> _arrivals = [];
+class _TransportScreenState extends State<TransportScreen>
+    with WidgetsBindingObserver {
+  static const Duration _pollInterval = Duration(seconds: 30);
+  static const int _maxPerDirection = 4;
+
+  late final TransportService _service = widget.service ?? TransportService();
+  late final SettingsService _settings;
+
+  List<TransportArrival> _arrivals = const [];
   bool _isLoading = true;
-  String _errorMessage = '';
+
+  /// The last request failed; anything on screen is from an earlier one.
+  bool _failed = false;
   DateTime? _lastUpdated;
+
+  String _campus = '';
+
+  /// Bumped when the campus changes so late responses for the previous stop
+  /// are ignored.
+  int _generation = 0;
+  Future<void>? _pending;
+
   Timer? _refreshTimer;
-  String _cachedCampus = '';
-  StreamSubscription<int>? _tabRefreshSubscription;
+  StreamSubscription<int>? _reselectSubscription;
 
   @override
   void initState() {
     super.initState();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadDepartures(false));
-    
-    _tabRefreshSubscription = import_main.tabRefreshController.stream.listen((index) {
-      if (index == 3 && mounted) {
-        final haptics = context.read<SettingsService>().hapticsEnabled;
-        HapticService.confirm(haptics);
-        _loadDepartures(true);
+    _settings = context.read<SettingsService>();
+    _campus = _settings.campus;
+    _settings.addListener(_onSettingsChanged);
+    WidgetsBinding.instance.addObserver(this);
+    AppEvents.currentTab.addListener(_onTabVisibilityChanged);
+
+    _reselectSubscription = AppEvents.tabReselected.listen((index) {
+      if (index == AppTab.transport && mounted) {
+        HapticService.confirm(_settings.hapticsEnabled);
+        _loadDepartures(showLoader: true);
       }
     });
-  }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final currentCampus = context.watch<SettingsService>().campus;
-    if (_cachedCampus != currentCampus) {
-      _cachedCampus = currentCampus;
-      _loadDepartures(true);
-    }
+    _updatePollingState();
+    _loadDepartures(showLoader: true);
   }
 
   @override
   void dispose() {
-    _tabRefreshSubscription?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    AppEvents.currentTab.removeListener(_onTabVisibilityChanged);
+    _settings.removeListener(_onSettingsChanged);
+    _reselectSubscription?.cancel();
     _refreshTimer?.cancel();
-    _transportService.dispose();
+    if (widget.service == null) _service.dispose();
     super.dispose();
   }
 
-  Future<void> _loadDepartures(bool showLoader) async {
-    if (showLoader && mounted) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = '';
-      });
+  bool get _isVisibleTab => AppEvents.currentTab.value == AppTab.transport;
+
+  bool get _isStale =>
+      _lastUpdated == null ||
+      DateTime.now().difference(_lastUpdated!) >= _pollInterval;
+
+  void _onSettingsChanged() {
+    if (_settings.campus == _campus) return;
+    _campus = _settings.campus;
+    _generation++;
+    _pending = null;
+    setState(() {
+      _arrivals = const [];
+      _lastUpdated = null;
+      _failed = false;
+    });
+    _loadDepartures(showLoader: true);
+  }
+
+  void _onTabVisibilityChanged() {
+    _updatePollingState();
+    if (_isVisibleTab && mounted && _isStale) _loadDepartures();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _updatePollingState();
+      if (_isVisibleTab && mounted && _isStale) _loadDepartures();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
     }
+  }
 
-    final stopId = _getStopIdForCampus(_cachedCampus);
-    final results = await _transportService.fetchDepartures(stopId);
+  /// Polls only while the tab is on screen.
+  void _updatePollingState() {
+    if (_isVisibleTab) {
+      _refreshTimer ??= Timer.periodic(_pollInterval, (_) => _loadDepartures());
+    } else {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+    }
+  }
 
-    if (mounted) {
+  Future<void> _loadDepartures({bool showLoader = false}) {
+    if (showLoader && mounted && !_isLoading) {
+      setState(() => _isLoading = true);
+    }
+    // Manual refreshes and the poll timer share one request.
+    return _pending ??= _fetch(_generation).whenComplete(() => _pending = null);
+  }
+
+  Future<void> _fetch(int generation) async {
+    try {
+      final results =
+          await _service.fetchDepartures(_stopIdForCampus(_campus));
+      if (!mounted || generation != _generation) return;
       setState(() {
+        _arrivals = results;
+        _lastUpdated = DateTime.now();
+        _failed = false;
         _isLoading = false;
-        if (results.isEmpty) {
-          _errorMessage = AppLocalizations.of(context).get('noDepartures');
-        } else {
-          _arrivals = results;
-          _lastUpdated = DateTime.now();
-        }
+      });
+    } catch (e) {
+      log('TransportScreen: loading departures failed: $e');
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _failed = true;
+        _isLoading = false;
       });
     }
   }
 
-  String _getStopIdForCampus(String campus) {
+  static String _stopIdForCampus(String campus) {
     switch (campus) {
-      case 'TA': return '900162004';
-      case 'TGS': return '900181504';
-      case 'WH': default: return '900181503';
+      case 'TA':
+        return '900162004';
+      case 'TGS':
+        return '900181504';
+      case 'WH':
+      default:
+        return '900181503';
     }
   }
 
-  String _getDirectionCategory(TransportArrival arrival, String campus) {
+  static String _directionCategory(TransportArrival arrival, String campus) {
     final origin = arrival.originName.toLowerCase();
     final dir = arrival.direction.toLowerCase();
-    
+
     if (campus == 'TA') {
       if (origin.contains('marksburgstr')) return 'S Friedrichsfelde Ost';
-      if (origin.isNotEmpty && (origin.contains('tierpark') || origin.contains('neuwieder'))) return 'S Schöneweide';
-      
+      if (origin.contains('tierpark') || origin.contains('neuwieder')) {
+        return 'S Schöneweide';
+      }
+
       // Fallback if origin is unknown
-      if (dir.contains('schöneweide') || 
-          dir.contains('adlershof') || 
-          dir.contains('johannisthal') || 
-          dir.contains('haeckelstr') || 
+      if (dir.contains('schöneweide') ||
+          dir.contains('adlershof') ||
+          dir.contains('johannisthal') ||
+          dir.contains('haeckelstr') ||
           dir.contains('sterndamm') ||
           dir.contains('köpenick')) {
         return 'S Schöneweide';
       }
       return 'S Friedrichsfelde Ost';
     } else {
-      if (origin.contains('firlstr') || origin.contains('rathenaustr')) return 'S Köpenick';
-      if (origin.isNotEmpty && (origin.contains('ostendstr') || origin.contains('weiskopffstr'))) return 'S Schöneweide';
-      
+      if (origin.contains('firlstr') || origin.contains('rathenaustr')) {
+        return 'S Köpenick';
+      }
+      if (origin.contains('ostendstr') || origin.contains('weiskopffstr')) {
+        return 'S Schöneweide';
+      }
+
       // Fallback if origin is unknown
-      if (dir.contains('schöneweide') || 
-          dir.contains('haeckelstr') || 
-          dir.contains('johannisthal') || 
+      if (dir.contains('schöneweide') ||
+          dir.contains('haeckelstr') ||
+          dir.contains('johannisthal') ||
           dir.contains('sterndamm') ||
           dir.contains('pasedagplatz') ||
           dir.contains('lichtenberg')) {
@@ -127,228 +209,295 @@ class _TransportScreenState extends State<TransportScreen> {
     }
   }
 
+  /// Upcoming departures per direction. Trams that have already left are
+  /// dropped, so a stale list (offline) never shows them as "now" forever.
+  List<MapEntry<String, List<TransportArrival>>> _groupUpcoming(DateTime now) {
+    final cutoff = now.subtract(const Duration(seconds: 45));
+    // Both directions of the stop are always listed, so that a direction
+    // without trams (late at night) reads as "nothing running" rather
+    // than looking like it went missing.
+    final groups = <String, List<TransportArrival>>{
+      'S Schöneweide': [],
+      _campus == 'TA' ? 'S Friedrichsfelde Ost' : 'S Köpenick': [],
+    };
+    for (final arrival in _arrivals) {
+      if (arrival.actualTime.isBefore(cutoff)) continue;
+      final list =
+          groups.putIfAbsent(_directionCategory(arrival, _campus), () => []);
+      if (list.length < _maxPerDirection) list.add(arrival);
+    }
+    return groups.entries.toList()
+      ..sort((a, b) {
+        if (a.key == b.key) return 0;
+        if (a.key == 'S Schöneweide') return -1;
+        if (b.key == 'S Schöneweide') return 1;
+        return a.key.compareTo(b.key);
+      });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final haptics = context.select<SettingsService, bool>((s) => s.hapticsEnabled);
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Transport'),
-        centerTitle: true,
+        title: Text(l10n.get('transport')),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              HapticService.selection(haptics);
-              _loadDepartures(true);
-            },
+          Center(
+            child: Tooltip(
+              message: 'Campus $_campus',
+              triggerMode: TooltipTriggerMode.tap,
+              child: TonalPill(
+                label: 'Tram $_campus',
+                icon: Icons.tram_outlined,
+                background: scheme.secondaryContainer,
+                foreground: scheme.onSecondaryContainer,
+              ),
+            ),
           ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: _isLoading
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : const Icon(Icons.refresh_rounded),
+            tooltip: l10n.get('refresh'),
+            onPressed: _isLoading
+                ? null
+                : () {
+                    HapticService.selection(_settings.hapticsEnabled);
+                    _loadDepartures(showLoader: true);
+                  },
+          ),
+          const SizedBox(width: 4),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          HapticService.selection(haptics);
-          await _loadDepartures(true);
-        },
-        child: _buildBody(theme),
-      ),
+      body: _buildBody(l10n),
     );
   }
 
-  Widget _buildBody(ThemeData theme) {
-    if (_isLoading && _arrivals.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Widget _buildBody(AppLocalizations l10n) {
+    if (_arrivals.isEmpty && _isLoading) return const LoadingState();
 
-    if (_errorMessage.isNotEmpty && _arrivals.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.directions_transit_outlined, size: 64, color: theme.colorScheme.outline),
-            const SizedBox(height: 16),
-            Text(_errorMessage, style: theme.textTheme.titleMedium),
-          ],
+    if (_arrivals.isEmpty && _failed) {
+      return StatusMessage(
+        icon: Icons.cloud_off_outlined,
+        shape: SoftShape.clover,
+        title: l10n.get('errorTransport'),
+        action: FilledButton.tonalIcon(
+          onPressed: () {
+            HapticService.confirm(_settings.hapticsEnabled);
+            _loadDepartures(showLoader: true);
+          },
+          icon: const Icon(Icons.refresh_rounded),
+          label: Text(l10n.get('retry')),
         ),
       );
     }
 
-    final categorized = <String, List<TransportArrival>>{};
-    for (var arr in _arrivals) {
-      final cat = _getDirectionCategory(arr, _cachedCampus);
-      categorized.putIfAbsent(cat, () => []).add(arr);
+    Future<void> onRefresh() {
+      HapticService.selection(_settings.hapticsEnabled);
+      return _loadDepartures();
     }
 
-    final sortedCategories = categorized.keys.toList()..sort((a, b) {
-      if (a == 'S Schöneweide') return -1;
-      if (b == 'S Schöneweide') return 1;
-      return a.compareTo(b);
-    });
+    final now = DateTime.now();
+    final groups = _groupUpcoming(now);
 
-    final l10n = AppLocalizations.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-      child: CustomScrollView(
-        slivers: [
-          if (_lastUpdated != null)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8.0, bottom: 24.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.update, size: 14, color: theme.colorScheme.onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${l10n.get('lastUpdated')}: ${DateFormat('HH:mm').format(_lastUpdated!)}',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
+    if (groups.every((group) => group.value.isEmpty)) {
+      return RefreshIndicator(
+        onRefresh: onRefresh,
+        child: StatusMessage(
+          icon: Icons.tram_outlined,
+          shape: SoftShape.flower,
+          title: l10n.get('noDepartures'),
+        ),
+      );
+    }
+
+    final theme = Theme.of(context);
+    final gutter = AppSpacing.gutter(context);
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+            gutter, 0, gutter, AppSpacing.bottomInset(context)),
+        children: [
+          if (_failed)
+            InfoBanner(
+              icon: Icons.cloud_off_outlined,
+              text: _lastUpdated == null
+                  ? l10n.get('offlineCache')
+                  : '${l10n.get('offlineCache')} '
+                      '${l10n.get('lastUpdated')}: ${Formats.time(_lastUpdated!)}',
+            )
+          else if (_lastUpdated != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.update_rounded,
+                    size: 14,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${l10n.get('lastUpdated')}: ${Formats.time(_lastUpdated!)}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          
-          for (var cat in sortedCategories) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 12.0, left: 4.0, top: 8.0),
-                child: Row(
-                  children: [
-                    Icon(Icons.arrow_forward_ios, size: 14, color: theme.colorScheme.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      cat,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
+          for (final group in groups) ...[
+            SectionHeader(group.key, icon: Icons.arrow_forward_rounded),
+            ListGroup(
+              children: [
+                for (final arrival in group.value)
+                  _ArrivalRow(arrival: arrival, now: now),
+                if (group.value.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.bedtime_outlined,
+                          size: 20,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            l10n.get('noDeparturesSoon'),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
             ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final arrList = categorized[cat]!.take(4).toList();
-                  if (index >= arrList.length) return const SizedBox.shrink();
-                  final arr = arrList[index];
-                  return _buildArrivalCard(arr, theme);
-                },
-                childCount: categorized[cat]!.take(4).length,
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ],
       ),
     );
   }
+}
 
-  Widget _buildArrivalCard(TransportArrival arrival, ThemeData theme) {
+class _ArrivalRow extends StatelessWidget {
+  const _ArrivalRow({required this.arrival, required this.now});
+
+  final TransportArrival arrival;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final l10n = AppLocalizations.of(context);
-    final now = DateTime.now();
-    final diff = (arrival.actualTime.difference(now).inSeconds / 60).round();
-    
-    // Formatting the relative time
-    String relativeTime;
-    if (diff <= 0) {
-      relativeTime = l10n.get('now');
+    final semantic = SemanticColors.of(context);
+
+    final minutes =
+        (arrival.actualTime.difference(now).inSeconds / 60).round();
+    final delay = arrival.delayMinutes;
+    final isSignificantDelay = delay > 5;
+    final cancelled = arrival.cancelled;
+
+    final String status;
+    final Color statusColor;
+    if (cancelled) {
+      status = l10n.get('cancelled');
+      statusColor = scheme.error;
+    } else if (minutes <= 0) {
+      status = l10n.get('now');
+      statusColor = semantic.warning;
     } else {
-      relativeTime = 'in $diff min';
+      status = l10n.inMinutes(minutes);
+      statusColor = isSignificantDelay ? scheme.error : scheme.primary;
     }
 
-    // Calculate real time shift
-    final delayMin = (arrival.actualTime.difference(arrival.scheduledTime).inSeconds / 60).round();
-    final hasTimeShift = delayMin != 0;
-    final isSignificantDelay = delayMin > 5;
-    final timeColor = diff <= 0 
-        ? Colors.orange 
-        : (isSignificantDelay ? theme.colorScheme.error : theme.colorScheme.primary);
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 0,
-      color: theme.colorScheme.secondaryContainer.withAlpha(100),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 48),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
+                color:
+                    cancelled ? scheme.errorContainer : scheme.primaryContainer,
+                borderRadius: AppShapes.mediumRadius,
               ),
               child: Text(
                 arrival.lineName,
+                textAlign: TextAlign.center,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onPrimaryContainer,
+                  color: cancelled
+                      ? scheme.onErrorContainer
+                      : scheme.onPrimaryContainer,
                 ),
               ),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        DateFormat('HH:mm').format(arrival.scheduledTime),
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                      if (hasTimeShift) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          delayMin > 0 ? '+$delayMin min' : '$delayMin min',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: isSignificantDelay ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Icon(Icons.arrow_right_alt_rounded, size: 16, color: theme.colorScheme.onSurfaceVariant),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          arrival.direction.isNotEmpty ? arrival.direction : l10n.get('unknownDirection'),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  children: [
+                    Text(
+                      Formats.time(arrival.scheduledTime),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: scheme.onSurface,
+                        decoration:
+                            cancelled ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                    if (!cancelled && delay != 0) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        delay > 0 ? '+$delay min' : '$delay min',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: isSignificantDelay
+                              ? scheme.error
+                              : scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
                 Text(
-                  relativeTime,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: timeColor,
+                  arrival.direction.isNotEmpty
+                      ? arrival.direction
+                      : l10n.get('unknownDirection'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            status,
+            style: theme.textTheme.titleMedium?.copyWith(color: statusColor),
+          ),
+        ],
       ),
     );
   }

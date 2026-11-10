@@ -65,8 +65,16 @@ class UpdateService {
 
   /// Simple semantic version comparison: returns true if [latest] > [current].
   static bool _isVersionNewer(String latest, String current) {
-    final latestParts = latest.split('.').map((s) => int.tryParse(s) ?? 0).toList();
-    final currentParts = current.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    // Compare the numeric core only: "1.2.0+7" and "1.2.0-beta" count as 1.2.0.
+    List<int> parse(String version) => version
+        .split(RegExp(r'[+-]'))
+        .first
+        .split('.')
+        .map((s) => int.tryParse(s.trim()) ?? 0)
+        .toList();
+
+    final latestParts = parse(latest);
+    final currentParts = parse(current);
 
     // Pad to same length
     while (latestParts.length < 3) {

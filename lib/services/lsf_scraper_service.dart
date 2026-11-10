@@ -1,285 +1,303 @@
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:html/parser.dart' as parser;
+
+import '../models/grades.dart';
+import '../models/lecture_details.dart';
+import '../models/person_details.dart';
 import '../models/timetable_event.dart';
-import 'log_service.dart';
+import '../utils/cookies.dart';
 import 'exceptions.dart';
+import 'log_service.dart';
+import 'lsf_parser.dart';
 
 class LsfScraperService {
+  static const Duration _timeout = Duration(seconds: 15);
+  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0)';
+  static const String _baseUrl = 'https://lsf.htw-berlin.de/qisserver/rds';
+  static const String _loginUrl =
+      '$_baseUrl?state=user&type=1&category=auth.login&startpage=portal.vm';
+
   final LogService _logger;
-  final http.Client _client = http.Client();
+  final http.Client _client;
   final Map<String, String> _cookies = {};
 
-  Map<String, String> get cookies => _cookies;
+  /// Lecture details rarely change; keep them for the lifetime of a session
+  /// so re-opening an event is instant.
+  final Map<String, LectureDetails> _detailsCache = {};
+  final Map<String, PersonDetails> _personCache = {};
 
-  LsfScraperService(this._logger);
+  /// The `asi` token of the current session, needed by the grade and
+  /// document pages. Tied to the session, so dropped with it.
+  String? _asi;
 
-  static const String _loginUrl = 'https://lsf.htw-berlin.de/qisserver/rds?state=user&type=1&category=auth.login&startpage=portal.vm';
+  LsfScraperService(this._logger, {http.Client? client})
+      : _client = client ?? http.Client();
 
-  void _updateCookies(http.BaseResponse response) {
-    String? rawCookie = response.headers['set-cookie'];
-    if (rawCookie != null) {
-      // Split by comma to handle multiple cookies but safely preserving date commas
-      var cookieParts = rawCookie.split(RegExp(r',\s*(?=[a-zA-Z0-9_-]+\=)'));
-      for (var c in cookieParts) {
-        int index = c.indexOf(';');
-        String cookieKeyValue = (index == -1) ? c : c.substring(0, index);
-        int eqIndex = cookieKeyValue.indexOf('=');
-        if (eqIndex != -1) {
-          String key = cookieKeyValue.substring(0, eqIndex).trim();
-          String value = cookieKeyValue.substring(eqIndex + 1).trim();
-          _cookies[key] = value;
-        }
-      }
-    }
+  Map<String, String> get cookies => Map.unmodifiable(_cookies);
+
+  bool get hasSession => _cookies.isNotEmpty;
+
+  /// Drops the session and everything fetched with it.
+  void clearCookies() {
+    _cookies.clear();
+    _detailsCache.clear();
+    _personCache.clear();
+    _asi = null;
   }
 
-  String get _cookieHeader {
-    return _cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
-  }
+  void dispose() => _client.close();
 
+  /// Returns true if the credentials were accepted. Throws on network errors
+  /// and when LSF itself is unavailable, so that callers never mistake an
+  /// outage for wrong credentials (or for a successful login).
   Future<bool> login(String username, String password) async {
     final request = http.Request('POST', Uri.parse(_loginUrl))
-      ..headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0)'
+      ..headers['User-Agent'] = _userAgent
       ..bodyFields = {
         'asdf': username,
         'fdsa': password,
-        'submit': 'Anmelden'
+        'submit': 'Anmelden',
       };
 
     if (_cookies.isNotEmpty) {
-      request.headers['Cookie'] = _cookieHeader;
+      request.headers['Cookie'] = cookieHeader(_cookies);
     }
 
     _logger.debug('POST login for $username');
-    final streamedResponse = await _client.send(request);
-    final response = await http.Response.fromStream(streamedResponse);
-    
-    _updateCookies(response);
+    final streamedResponse = await _client.send(request).timeout(_timeout);
+    final response =
+        await http.Response.fromStream(streamedResponse).timeout(_timeout);
 
-    final html = response.body;
-    if (!_isLoggedIn(html)) {
-      _logger.warning('LsfScraperService.login: authentication failed for user $username');
+    if (response.statusCode >= 500) {
+      _logger.warning('LSF login unavailable (HTTP ${response.statusCode})');
+      throw HttpStatusException(response.statusCode, 'LSF login');
+    }
+
+    mergeSetCookie(response.headers['set-cookie'], _cookies);
+    _asi = null;
+
+    if (isLsfLoginPage(response.body)) {
+      _logger.warning(
+          'LsfScraperService.login: authentication failed for user $username');
       return false;
     }
-    _logger.info('LsfScraperService.login: authentication successful for user $username');
+    _logger.info(
+        'LsfScraperService.login: authentication successful for user $username');
     return true;
   }
 
-  bool _isLoggedIn(String html) {
-    // If the LSF login form is still present, authentication failed.
-    // LSF uses 'asdf' for the username field name.
-    return !html.contains('name="asdf"');
+  /// GETs an LSF page with the session cookies and returns its HTML.
+  Future<String> _getAuthenticated(String url, String what) async {
+    if (_cookies.isEmpty) {
+      _logger.warning('Session expired (no cookies) while fetching $what');
+      throw SessionExpiredException();
+    }
+
+    final response = await _client.get(
+      Uri.parse(url),
+      headers: {
+        'User-Agent': _userAgent,
+        'Cookie': cookieHeader(_cookies),
+      },
+    ).timeout(_timeout);
+
+    mergeSetCookie(response.headers['set-cookie'], _cookies);
+
+    if (response.statusCode >= 500) {
+      _logger.warning('LSF unavailable (HTTP ${response.statusCode}) for $what');
+      throw HttpStatusException(response.statusCode, what);
+    }
+
+    final html = response.body;
+    if (isLsfLoginPage(html)) {
+      _logger.warning(
+          'Session expired (login form returned) while fetching $what');
+      throw SessionExpiredException();
+    }
+    _logger.info('Fetched $what (${response.bodyBytes.length} bytes)');
+    return html;
   }
 
   Future<List<TimetableEvent>> fetchTimetable(String targetWeek) async {
-    final scheduleUrl = 'https://lsf.htw-berlin.de/qisserver/rds?state=wplan&week=$targetWeek&act=show&pool=&show=plan&P.vx=mittel&P.Print=';
-    
-    
-    final request = http.Request('GET', Uri.parse(scheduleUrl))
-      ..headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0)';
-    
-    if (_cookies.isEmpty) {
-      _logger.warning('Session expired (no cookies) while fetching timetable for $targetWeek');
-      throw SessionExpiredException();
-    }
-
-    request.headers['Cookie'] = _cookieHeader;
-
     _logger.debug('GET timetable for week $targetWeek');
-    final streamedResponse = await _client.send(request);
-    final response = await http.Response.fromStream(streamedResponse);
-    
-    _updateCookies(response);
-    _logger.info('Fetched timetable for $targetWeek (${response.bodyBytes.length} bytes)');
-
-    final html = response.body;
-
-    final document = parser.parse(html);
-    final scheduleData = <TimetableEvent>[];
-
-    final eventCells = document.querySelectorAll('td').where((element) {
-      final className = element.className;
-      if (!className.startsWith('plan')) return false;
-      const ignoredClasses = ['plan_rahmen', 'plan5', 'plan6', 'plan7', 'plan9'];
-      return !ignoredClasses.contains(className);
-    });
-
-    for (var cell in eventCells) {
-      final titleTags = cell.querySelectorAll('a.ver');
-      if (titleTags.isEmpty) continue;
-
-      final bool isOverlapping = titleTags.length > 1;
-
-      for (var titleTag in titleTags) {
-        final title = titleTag.text.trim();
-        String? publishId;
-        final href = titleTag.attributes['href'] ?? '';
-        final uri = Uri.tryParse(href.replaceAll('&amp;', '&'));
-        if (uri != null && uri.queryParameters.containsKey('publishid')) {
-          publishId = uri.queryParameters['publishid'];
-        }
-
-        // Find the event container (nearest parent table or the cell itself)
-        // LSF wraps individual overlapping events in their own nested <table>.
-        var eventContainer = cell;
-        var current = titleTag.parent;
-        while (current != null && current != cell) {
-          if (current.localName == 'table') {
-            eventContainer = current;
-            break;
-          }
-          current = current.parent;
-        }
-
-        String? day;
-        String? time;
-        String? room;
-        String? type;
-        String? frequency;
-
-        // Extract details from notiz cells specifically for this event
-        final notizCells = eventContainer.querySelectorAll('td.notiz');
-        for (var nCell in notizCells) {
-          final text = nCell.text.replaceAll('\n', ' ').replaceAll('\r', '').trim();
-          
-          if (text.contains('Raum:')) {
-            final parts = text.split('Raum:');
-            room = parts[1].trim();
-            
-            final typeParts = parts[0].split(',');
-            if (typeParts.isNotEmpty) {
-              type = typeParts[0].trim();
-            }
-          } else if (text.contains(':') && text.contains('-') && text.contains(',')) {
-            final timeParts = text.split(',');
-            if (timeParts.length >= 2) {
-              day = timeParts[0].trim();
-              time = timeParts[1].trim();
-            }
-            if (timeParts.length >= 3) {
-              frequency = timeParts[2].trim();
-            }
-          }
-        }
-
-        // Detect exam status specifically for this event
-        bool isExam = false;
-        final warnungSpans = eventContainer.querySelectorAll('span.warnung');
-        for (var span in warnungSpans) {
-          if (span.text.contains('Prüfung')) {
-            isExam = true;
-            break;
-          }
-        }
-
-        scheduleData.add(TimetableEvent(
-          title: title,
-          day: day ?? '',
-          time: time ?? '',
-          room: room ?? '',
-          type: type ?? '',
-          frequency: frequency ?? '',
-          publishId: publishId,
-          isExam: isExam,
-          isOverlapping: isOverlapping,
-        ));
-      }
-    }
-
-    return scheduleData;
+    final html = await _getAuthenticated(
+      '$_baseUrl?state=wplan&week=$targetWeek&act=show&pool=&show=plan&P.vx=mittel&P.Print=',
+      'timetable for $targetWeek',
+    );
+    return compute(parseTimetableHtml, html);
   }
 
-  Future<Map<String, dynamic>?> fetchLectureDetails(String publishId) async {
-    final detailUrl = 'https://lsf.htw-berlin.de/qisserver/rds?state=verpublish&status=init&vmfile=no&publishid=$publishId&moduleCall=webInfo&publishConfFile=webInfo&publishSubDir=veranstaltung';
-    
-    
-    final request = http.Request('GET', Uri.parse(detailUrl))
-      ..headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0)';
-    
-    if (_cookies.isEmpty) {
-      _logger.warning('Session expired (no cookies) while fetching lecture details for $publishId');
-      throw SessionExpiredException();
-    }
+  Future<LectureDetails> fetchLectureDetails(String publishId) async {
+    final cached = _detailsCache[publishId];
+    if (cached != null) return cached;
 
-    request.headers['Cookie'] = _cookieHeader;
-
-    final streamedResponse = await _client.send(request);
-    final response = await http.Response.fromStream(streamedResponse);
-    _updateCookies(response);
-
-    final html = response.body;
-
-    final document = parser.parse(html);
-    final details = <String, dynamic>{
-      'publishId': publishId,
-      'credits': null,
-      'sws': null,
-      'teachers': <String>[],
-      'exam_dates': <Map<String, String>>[]
-    };
-
-    final thTds = document.querySelectorAll('th, td');
-    for (var i = 0; i < thTds.length; i++) {
-        final text = thTds[i].text.trim();
-        if (text == "Credits") {
-            var next = thTds[i].nextElementSibling;
-            if (next != null && next.localName == 'td') {
-                details['credits'] = next.text.trim();
-            }
-        } else if (text == "SWS") {
-            var next = thTds[i].nextElementSibling;
-            if (next != null && next.localName == 'td') {
-                details['sws'] = next.text.trim();
-            }
-        }
-    }
-
-    final tables = document.querySelectorAll('table');
-    for (var table in tables) {
-        final headersRaw = table.querySelectorAll('th');
-        final headers = headersRaw.map((e) => e.text.trim()).toList();
-        
-        if (headers.contains('Lehrperson')) {
-            int dayIdx = headers.indexOf('Tag');
-            int timeIdx = headers.indexOf('Zeit');
-            int durationIdx = headers.indexOf('Dauer');
-            int teacherIdx = headers.indexOf('Lehrperson');
-            int remarkIdx = headers.indexOf('Bemerkung');
-
-            if (dayIdx == -1 || timeIdx == -1 || durationIdx == -1 || teacherIdx == -1 || remarkIdx == -1) continue;
-
-            final rows = table.querySelectorAll('tr');
-            for (var row in rows) {
-                final cells = row.querySelectorAll('td');
-                if (cells.length > dayIdx && cells.length > timeIdx && cells.length > durationIdx && cells.length > teacherIdx && cells.length > remarkIdx) {
-                    final teacher = cells[teacherIdx].text.trim();
-                    final remark = cells[remarkIdx].text.trim();
-                    
-                    if (teacher.isNotEmpty && !(details['teachers'] as List).contains(teacher)) {
-                        (details['teachers'] as List).add(teacher);
-                    }
-                    
-                    if (remark.contains('Prüfung')) {
-                        final examInfo = {
-                            'day': cells[dayIdx].text.trim(),
-                            'time': cells[timeIdx].text.trim(),
-                            'date': cells[durationIdx].text.trim().replaceAll('am ', ''),
-                        };
-                        bool exists = false;
-                        for(var ex in (details['exam_dates'] as List)){
-                            if(ex['day'] == examInfo['day'] && ex['time'] == examInfo['time'] && ex['date'] == examInfo['date']){
-                                exists = true;
-                                break;
-                            }
-                        }
-                        if(!exists){
-                            (details['exam_dates'] as List).add(examInfo);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    final html = await _getAuthenticated(
+      '$_baseUrl?state=verpublish&status=init&vmfile=no&publishid=$publishId&moduleCall=webInfo&publishConfFile=webInfo&publishSubDir=veranstaltung',
+      'lecture details for $publishId',
+    );
+    final details = await compute(parseLectureDetailsHtml, (publishId, html));
+    _detailsCache[publishId] = details;
     return details;
   }
+
+  Future<PersonDetails> fetchPersonDetails(String personId) async {
+    final cached = _personCache[personId];
+    if (cached != null) return cached;
+
+    final html = await _getAuthenticated(
+      '$_baseUrl?state=verpublish&status=init&vmfile=no&moduleCall=webInfo&publishConfFile=webInfoPerson&publishSubDir=personal&keep=y&personal.pid=$personId',
+      'person details for $personId',
+    );
+    final details = await compute(parsePersonDetailsHtml, (personId, html));
+    _personCache[personId] = details;
+    return details;
+  }
+
+  static const String _documentsMenuUrl =
+      '$_baseUrl?state=change&type=1&moduleParameter=studyPOSReportMenu&nextdir=change&next=menu.vm&subdir=applications&xml=menu&purge=y&navigationPosition=functions%2Cdoc&breadcrumb=documents&topitem=functions&subitem=doc';
+
+  /// Fetches the documents menu, which also carries the session's `asi`.
+  /// A page without one means the session is not signed in.
+  Future<List<LsfDocument>> fetchDocuments() async {
+    final html = await _getAuthenticated(_documentsMenuUrl, 'documents menu');
+    final asi = parseLsfAsi(html);
+    if (asi == null) {
+      _logger.warning('Session expired (no asi) while fetching documents');
+      throw SessionExpiredException();
+    }
+    _asi = asi;
+    return compute(parseDocumentsMenuHtml, html);
+  }
+
+  Future<String> _sessionAsi() async {
+    final asi = _asi;
+    if (asi != null) return asi;
+    await fetchDocuments();
+    return _asi!;
+  }
+
+  /// GETs an LSF page of the signed-in session, with the current `asi`.
+  /// A page without the token means the token or session went stale.
+  Future<String> _getWithAsi(Uri url, String what) async {
+    final asi = await _sessionAsi();
+    final withAsi =
+        url.replace(queryParameters: {...url.queryParameters, 'asi': asi});
+    final html = await _getAuthenticated(withAsi.toString(), what);
+    if (parseLsfAsi(html) == null) {
+      _asi = null;
+      throw SessionExpiredException();
+    }
+    return html;
+  }
+
+  static final Uri _gradeTreeUrl = Uri.parse(_baseUrl).replace(
+    queryParameters: {
+      'state': 'notenspiegelStudent',
+      'next': 'tree.vm',
+      'nextdir': 'qispos/notenspiegel/student',
+      'navigationPosition': 'functions,notenspiegelStudent',
+      'breadcrumb': 'notenKlassenSpiegel',
+      'topitem': 'functions',
+      'subitem': 'notenspiegelStudent',
+    },
+  );
+
+  static final Uri _achievementUrl = Uri.parse(_baseUrl).replace(
+    queryParameters: {
+      'state': 'htmlbesch',
+      'application': 'sospos',
+      'moduleParameter': 'Student',
+      'navigationPosition': 'functions,notenspiegel',
+      'breadcrumb': 'leistungsstand',
+      'topitem': 'functions',
+      'subitem': 'notenspiegel',
+    },
+  );
+
+  /// The grades of every degree programme ("Noten- und Klassenspiegel").
+  Future<GradeReport> fetchGrades() async {
+    final tree = await _getWithAsi(_gradeTreeUrl, 'grade overview');
+    final lists = await compute(parseGradeTreeHtml, tree);
+    if (lists.isEmpty) {
+      // A single programme may be shown right away.
+      final report = await compute(parseGradeListHtml, tree);
+      _logger.info('Grade overview without programme selection '
+          '(${report.results.length} results)');
+      return report;
+    }
+
+    final reports = <GradeReport>[];
+    for (final list in lists) {
+      final html = await _getWithAsi(list, 'grade list');
+      reports.add(await compute(parseGradeListHtml, html));
+    }
+    if (reports.length == 1) return reports.single;
+    final averages = reports.map((r) => r.average).nonNulls.toSet();
+    final credits = reports.map((r) => r.credits).nonNulls.toSet();
+    return GradeReport(
+      programs: [for (final r in reports) ...r.programs],
+      results: [for (final r in reports) ...r.results],
+      groups: [for (final r in reports) ...r.groups],
+      // Several programmes have no common average or credit total.
+      average: averages.length == 1 ? averages.single : null,
+      credits: credits.length == 1 ? credits.single : null,
+    );
+  }
+
+  /// How everyone who took [result]'s exam did, or null if LSF has no
+  /// distribution for it.
+  Future<GradeDistribution?> fetchDistribution(ExamResult result) async {
+    final url = result.distributionUrl;
+    if (url == null) return null;
+    final html = await _getWithAsi(url, 'grade distribution');
+    return compute(parseGradeDistributionHtml, html);
+  }
+
+  /// Per-semester records of achievement and transcripts.
+  Future<AchievementDocuments> fetchAchievementDocuments() async {
+    final html = await _getWithAsi(_achievementUrl, 'achievement documents');
+    return compute(parseAchievementDocumentsHtml, html);
+  }
+
+  /// Lets LSF generate [document] for this session and returns the PDF.
+  Future<Uint8List> downloadDocument(LsfDocument document) async {
+    if (_cookies.isEmpty) throw SessionExpiredException();
+    final asi = await _sessionAsi();
+    final url = document.url.replace(
+      queryParameters: {...document.url.queryParameters, 'asi': asi},
+    );
+    _logger.debug('GET document ${document.url.queryParameters['moduleCall']}');
+    final response = await _client.get(url, headers: {
+      'User-Agent': _userAgent,
+      'Cookie': cookieHeader(_cookies),
+    }).timeout(const Duration(seconds: 60));
+    mergeSetCookie(response.headers['set-cookie'], _cookies);
+
+    if (response.statusCode >= 500) {
+      throw HttpStatusException(response.statusCode, 'document');
+    }
+    final bytes = response.bodyBytes;
+    if (isPdf(bytes)) {
+      _logger.info('Downloaded document (${bytes.length} bytes)');
+      return bytes;
+    }
+    _logger.warning('Document request returned no PDF '
+        '(HTTP ${response.statusCode}, ${response.headers['content-type']})');
+    // A page of the signed-in session (it carries the token): LSF has no
+    // such document for this student. Anything else is the login or error
+    // page of a lost session.
+    final html = response.body;
+    if (!isLsfLoginPage(html) && parseLsfAsi(html) == asi) {
+      throw DocumentUnavailableException();
+    }
+    _asi = null;
+    throw SessionExpiredException();
+  }
+
+  static bool isPdf(List<int> bytes) =>
+      bytes.length > 4 &&
+      bytes[0] == 0x25 && // %PDF
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x44 &&
+      bytes[3] == 0x46;
 }

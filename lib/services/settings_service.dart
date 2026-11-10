@@ -10,15 +10,15 @@ class SettingsService extends ChangeNotifier {
   bool _amoledTheme = false;
   bool _showWeekends = false;
   String _mensaPriceCategory = 'students';
-  bool _compactMensaView = false;
   List<String> _mensaCategoryOrder = [];
+  Set<String> _mensaDietFilters = const {};
   bool _hapticsEnabled = true;
   bool _showBreakTime = true;
-  bool _compactTimetableView = false;
+  bool _compactView = false;
   bool _animationsEnabled = true;
   bool _timetableIsWeekView = false;
   bool _hideLabels = false;
-  bool _lsfOnEmailLongPress = false;
+  bool _emailInNavBar = true;
 
   bool _isLoaded = false;
 
@@ -33,15 +33,22 @@ class SettingsService extends ChangeNotifier {
   bool get amoledTheme => _amoledTheme;
   bool get showWeekends => _showWeekends;
   String get mensaPriceCategory => _mensaPriceCategory;
-  bool get compactMensaView => _compactMensaView;
   List<String> get mensaCategoryOrder => _mensaCategoryOrder;
+
+  /// Active diet filters of the Mensa tab ('vegetarian', 'vegan', 'meat').
+  /// Empty means everything is shown.
+  Set<String> get mensaDietFilters => _mensaDietFilters;
   bool get hapticsEnabled => _hapticsEnabled;
   bool get showBreakTime => _showBreakTime;
-  bool get compactTimetableView => _compactTimetableView;
+
+  /// Denser cards in the timetable and the Mensa menu.
+  bool get compactView => _compactView;
   bool get animationsEnabled => _animationsEnabled;
   bool get timetableIsWeekView => _timetableIsWeekView;
   bool get hideLabels => _hideLabels;
-  bool get lsfOnEmailLongPress => _lsfOnEmailLongPress;
+
+  /// E-mail as its own tab (true) or as an entry of the menu (false).
+  bool get emailInNavBar => _emailInNavBar;
   bool get isLoaded => _isLoaded;
 
   SettingsService();
@@ -75,16 +82,19 @@ class SettingsService extends ChangeNotifier {
     _amoledTheme     = _prefs!.getBool('amoledTheme')     ?? false;
     _showWeekends    = _prefs!.getBool('showWeekends')    ?? false;
     _mensaPriceCategory = _prefs!.getString('mensaPriceCategory') ?? 'students';
-    _compactMensaView   = _prefs!.getBool('compactMensaView')    ?? false;
     _hapticsEnabled     = _prefs!.getBool('hapticsEnabled')      ?? true;
     _showBreakTime       = _prefs!.getBool('showBreakTime')       ?? true;
-    _compactTimetableView = _prefs!.getBool('compactTimetableView') ?? false;
+    // Formerly two switches (timetable / Mensa); either one enables it.
+    _compactView = (_prefs!.getBool('compactTimetableView') ?? false) ||
+        (_prefs!.getBool('compactMensaView') ?? false);
     _animationsEnabled     = _prefs!.getBool('animationsEnabled')      ?? true;
     _timetableIsWeekView   = _prefs!.getBool('timetableIsWeekView')    ?? false;
     _hideLabels            = _prefs!.getBool('hideLabels')             ?? false;
-    _lsfOnEmailLongPress   = _prefs!.getBool('lsfOnEmailLongPress')    ?? false;
+    _emailInNavBar = _prefs!.getBool('emailInNavBar') ?? true;
     final savedOrder    = _prefs!.getStringList('mensaCategoryOrder');
     _mensaCategoryOrder = savedOrder ?? [];
+    _mensaDietFilters =
+        Set.unmodifiable(_prefs!.getStringList('mensaDietFilters') ?? const []);
 
     _isLoaded = true;
     notifyListeners();
@@ -139,17 +149,23 @@ class SettingsService extends ChangeNotifier {
     await _prefs?.setString('mensaPriceCategory', category);
   }
 
-  Future<void> updateCompactMensaView(bool compact) async {
-    if (compact == _compactMensaView) return;
-    _compactMensaView = compact;
-    notifyListeners();
-    await _prefs?.setBool('compactMensaView', compact);
-  }
-
   Future<void> updateMensaCategoryOrder(List<String> order) async {
     _mensaCategoryOrder = order;
     notifyListeners();
     await _prefs?.setStringList('mensaCategoryOrder', order);
+  }
+
+  Future<void> setMensaDietFilters(Set<String> filters) async {
+    // A new set instance, so `context.select` sees the change.
+    _mensaDietFilters = Set.unmodifiable(filters);
+    notifyListeners();
+    await _prefs?.setStringList('mensaDietFilters', filters.toList());
+  }
+
+  Future<void> toggleMensaDietFilter(String filter) {
+    final next = {..._mensaDietFilters};
+    if (!next.remove(filter)) next.add(filter);
+    return setMensaDietFilters(next);
   }
 
   Future<void> updateHapticsEnabled(bool enabled) async {
@@ -166,11 +182,12 @@ class SettingsService extends ChangeNotifier {
     await _prefs?.setBool('showBreakTime', show);
   }
 
-  Future<void> updateCompactTimetableView(bool compact) async {
-    if (compact == _compactTimetableView) return;
-    _compactTimetableView = compact;
+  Future<void> updateCompactView(bool compact) async {
+    if (compact == _compactView) return;
+    _compactView = compact;
     notifyListeners();
     await _prefs?.setBool('compactTimetableView', compact);
+    await _prefs?.remove('compactMensaView');
   }
 
   Future<void> updateAnimationsEnabled(bool enabled) async {
@@ -187,18 +204,18 @@ class SettingsService extends ChangeNotifier {
     await _prefs?.setBool('timetableIsWeekView', isWeekView);
   }
 
+  Future<void> updateEmailInNavBar(bool inNavBar) async {
+    if (inNavBar == _emailInNavBar) return;
+    _emailInNavBar = inNavBar;
+    notifyListeners();
+    await _prefs?.setBool('emailInNavBar', inNavBar);
+  }
+
   Future<void> updateHideLabels(bool hide) async {
     if (hide == _hideLabels) return;
     _hideLabels = hide;
     notifyListeners();
     await _prefs?.setBool('hideLabels', hide);
-  }
-
-  Future<void> updateLsfOnEmailLongPress(bool isEnabled) async {
-    if (isEnabled == _lsfOnEmailLongPress) return;
-    _lsfOnEmailLongPress = isEnabled;
-    notifyListeners();
-    await _prefs?.setBool('lsfOnEmailLongPress', isEnabled);
   }
 
 }

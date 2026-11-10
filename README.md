@@ -24,11 +24,18 @@
 When I enrolled in October 2025, I was surprised to find that a university as large as HTW Berlin **didn't have its own mobile app**. I have no intention of using **Studo**, which is not only full of junk (authenticator, job search, feed... seriously??), but also requires your phone number and hides its basic functionality behind a “pro” subscription. Besides, the interface for both Studo and LSF hasn’t changed since 2010 (and that’s not even an exaggeration), so I decided that I could build a decent app for myself (and for you) - one that’s **beautiful, modern, completely free, and open-source**.
 
 ### Core Features
-- **Timetable:** Automatically fetched from LSF and cleanly presented.
+- **Timetable:** Automatically fetched from LSF, shown in day or week view, with a detail sheet for every class.
+- **Grades:** Your *Noten- und Klassenspiegel* from LSF: ECTS, average, module groups, remarks and the grade distribution of every exam.
+- **Certificates:** Enrolment certificates (German/English) and records of achievement as PDFs, to open or share.
+- **Moodle:** Signed in automatically with your saved HTW credentials, in an embedded browser that follows the light/dark theme.
 - **Webmail integration:** View your HTW Emails right in the app.
-- **Mensa Menu:** Daily food plans from the HTW Berlin cafeterias.
+- **Mensa Menu:** Daily food plans from the HTW Berlin cafeterias, with diet filters and campus selection.
 - **Transport:** Live tram departures around campuses.
+- **Material 3 Expressive design:** Floating navigation bar, dynamic colours, animated splash, predictive back.
 - **Secure & Private:** Credentials stored safely and locally on your device allowing autologin.
+
+### What's new in 2.0
+Uniwe 2.0 is a ground-up redesign in Material 3 Expressive, adds Moodle, Grades and Certificates, and makes the timetable, Mensa and transport screens faster and more reliable.
 
 ### Tip for Mail screen
 - Go to Settings → Mail
