@@ -16,6 +16,7 @@ class SettingsService extends ChangeNotifier {
   bool _showBreakTime = true;
   bool _compactView = false;
   bool _animationsEnabled = true;
+  bool _splashEnabled = true;
   bool _timetableIsWeekView = false;
   bool _hideLabels = false;
   bool _emailInNavBar = true;
@@ -44,6 +45,7 @@ class SettingsService extends ChangeNotifier {
   /// Denser cards in the timetable and the Mensa menu.
   bool get compactView => _compactView;
   bool get animationsEnabled => _animationsEnabled;
+  bool get splashEnabled => _splashEnabled;
   bool get timetableIsWeekView => _timetableIsWeekView;
   bool get hideLabels => _hideLabels;
 
@@ -87,6 +89,7 @@ class SettingsService extends ChangeNotifier {
     // Formerly two switches (timetable / Mensa); either one enables it.
     _compactView = (_prefs!.getBool('compactTimetableView') ?? false) ||
         (_prefs!.getBool('compactMensaView') ?? false);
+    _splashEnabled = _prefs!.getBool('splashEnabled') ?? true;
     _animationsEnabled     = _prefs!.getBool('animationsEnabled')      ?? true;
     _timetableIsWeekView   = _prefs!.getBool('timetableIsWeekView')    ?? false;
     _hideLabels            = _prefs!.getBool('hideLabels')             ?? false;
@@ -188,6 +191,13 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
     await _prefs?.setBool('compactTimetableView', compact);
     await _prefs?.remove('compactMensaView');
+  }
+
+  Future<void> updateSplashEnabled(bool enabled) async {
+    if (enabled == _splashEnabled) return;
+    _splashEnabled = enabled;
+    notifyListeners();
+    await _prefs?.setBool('splashEnabled', enabled);
   }
 
   Future<void> updateAnimationsEnabled(bool enabled) async {

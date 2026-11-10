@@ -593,7 +593,7 @@ void main() {
       await _settle(tester);
       expect(app.settings.compactView, isTrue);
 
-      await tester.scrollUntilVisible(find.text('Dark'), 200);
+      await tester.scrollUntilVisible(find.text('Dark'), -200);
       await tester.tap(find.text('Dark'));
       await _settle(tester);
       expect(app.settings.themeMode, ThemeMode.dark);
@@ -603,7 +603,7 @@ void main() {
       await _shot(tester, 'settings_bottom_light');
 
       // Logging out asks first, then clears the session.
-      await tester.scrollUntilVisible(find.text('Log out'), -300);
+      await tester.scrollUntilVisible(find.text('Log out'), -150);
       await _settle(tester);
       await tester.tap(find.text('Log out'));
       await _settle(tester);

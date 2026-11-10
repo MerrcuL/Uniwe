@@ -176,6 +176,12 @@ class SettingsScreen extends StatelessWidget {
                 onChanged: settings.updateAnimationsEnabled,
               ),
               _SwitchTile(
+                icon: Icons.rocket_launch_outlined,
+                title: l10n.get('splashAnimation'),
+                value: settings.splashEnabled,
+                onChanged: settings.updateSplashEnabled,
+              ),
+              _SwitchTile(
                 icon: Icons.mail_outline_rounded,
                 title: l10n.get('emailInNavBar'),
                 subtitle: l10n.get('emailInNavBarSubtitle'),

@@ -116,6 +116,8 @@ class _UniweAppState extends State<UniweApp> with WidgetsBindingObserver {
     final locale = context.select<SettingsService, Locale>((s) => s.locale);
     final settingsLoaded =
         context.select<SettingsService, bool>((s) => s.isLoaded);
+    final splashEnabled =
+        context.select<SettingsService, bool>((s) => s.splashEnabled);
     final isCheckingAuth =
         context.select<AuthService, bool>((a) => a.isChecking);
 
@@ -165,7 +167,9 @@ class _UniweAppState extends State<UniweApp> with WidgetsBindingObserver {
         fit: StackFit.expand,
         children: [
           child ?? const SizedBox.shrink(),
-          if (_showSplash)
+          // Until the settings are read the overlay covers the app, so a
+          // disabled splash is dropped as soon as that is known.
+          if (_showSplash && (!settingsLoaded || splashEnabled))
             Positioned.fill(
               child: SplashOverlay(
                 ready: isReady,
