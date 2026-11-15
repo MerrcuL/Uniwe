@@ -7,7 +7,7 @@
   
   <br>
 
-  [![Download from latest release](https://img.shields.io/badge/Download-Release-blue?style=for-the-badge&logo=github)](https://github.com/MerrcuL/Uniwe/releases/latest)
+  [![Download from latest release](https://img.shields.io/badge/Download-Release-blue?style=for-the-badge&logo=github)](https://github.com/MerrcuL/Uniwe/releases/latest) [![Website](https://img.shields.io/badge/Website-uniwe.mercul.org-76B900?style=for-the-badge&logo=googlechrome&logoColor=white)](https://uniwe.mercul.org)
 </div>
 
 <p align="center" width="100%">
