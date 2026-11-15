@@ -11,7 +11,7 @@
 </div>
 
 <p align="center" width="100%">
-<img src="assets/Screenshots/schedule_en.jpg" width="33%"><img src="assets/Screenshots/mensa_en.jpg" width="33%"><img src="assets/Screenshots/tram_en.jpg" width="33%"></p>
+<img src="assets/Screenshots/timetable_en.png" width="19%"> <img src="assets/Screenshots/mensa_en.png" width="19%"> <img src="assets/Screenshots/transport_en.png" width="19%"> <img src="assets/Screenshots/semester_en.png" width="19%"> <img src="assets/Screenshots/grades_en.png" width="19%"></p>
 
 *If you don't know which version to download:*
 * **arm64-v8a:** Almost certainly this one
@@ -23,10 +23,17 @@
 
 When I enrolled in October 2025, I was surprised to find that a university as large as HTW Berlin **didn't have its own mobile app**. I have no intention of using **Studo**, which is not only full of junk (authenticator, job search, feed... seriously??), but also requires your phone number and hides its basic functionality behind a “pro” subscription. Besides, the interface for both Studo and LSF hasn’t changed since 2010 (and that’s not even an exaggeration), so I decided that I could build a decent app for myself (and for you) - one that’s **beautiful, modern, completely free, and open-source**.
 
+In the meantime HTW Berlin has released an official app, but it is barely better than Studo. So Uniwe stays.
+
 ### Core Features
 - **Timetable:** Automatically fetched from LSF, shown in day or week view, with a detail sheet for every class.
 - **Grades:** Your *Noten- und Klassenspiegel* from LSF: ECTS, average, module groups, remarks and the grade distribution of every exam.
 - **Certificates:** Enrolment certificates (German/English) and records of achievement as PDFs, to open or share.
+- **Exams & enrolments:** Your registered exams with a countdown, and the *Belegübersicht* with the state of every course.
+- **Cancelled classes:** LSF's list of cancelled classes, marked right in your timetable.
+- **Semester dates:** The academic calendar as a time scale: lecture weeks, exam periods and deadlines.
+- **Home screen widgets:** Next class, classes of the day, Mensa and semester progress.
+- **Your navigation:** Reorder, move or hide every destination of the navigation bar and the menu.
 - **Moodle:** Signed in automatically with your saved HTW credentials, in an embedded browser that follows the light/dark theme.
 - **Webmail integration:** View your HTW Emails right in the app.
 - **Mensa Menu:** Daily food plans from the HTW Berlin cafeterias, with diet filters and campus selection.

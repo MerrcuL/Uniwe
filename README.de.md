@@ -11,7 +11,7 @@
 </div>
 
 <p align="center" width="100%">
-<img src="assets/Screenshots/schedule_de.png" width="33%"><img src="assets/Screenshots/mensa_de.jpg" width="33%"><img src="assets/Screenshots/tram_de.jpg" width="33%"></p>
+<img src="assets/Screenshots/timetable_de.png" width="19%"> <img src="assets/Screenshots/mensa_de.png" width="19%"> <img src="assets/Screenshots/transport_de.png" width="19%"> <img src="assets/Screenshots/semester_de.png" width="19%"> <img src="assets/Screenshots/grades_de.png" width="19%"></p>
 
 *Wenn du nicht weißt, welche Version du herunterladen sollst:*
 * **arm64-v8a:** Fast sicher diese Version
@@ -22,12 +22,19 @@
 
 Als ich mich im Oktober 2025 einschrieb, war ich überrascht, dass eine so große Hochschule wie die HTW Berlin **keine eigene mobile App hatte**. Ich habe nicht die Absicht, **Studo** zu nutzen, das nicht nur voller Schnickschnack ist (Authentifikator, Jobsuche, Feed … im Ernst??), sondern auch Ihre Telefonnummer erfordert und seine grundlegenden Funktionen hinter einem „Pro“-Abonnement versteckt. Außerdem hat sich die Benutzeroberfläche sowohl von Studo als auch von LSF seit 2010 nicht verändert (und das ist nicht einmal übertrieben), also beschloss ich, eine anständige App für mich (und für euch) zu entwickeln – eine, die **schön, modern, völlig kostenlos und Open Source** ist.
 
+Inzwischen hat die HTW Berlin eine offizielle App veröffentlicht, aber sie ist kaum besser als Studo. Uniwe bleibt also.
+
 Übersetzt mit DeepL.com (kostenlose Version)
 
 ### Kernfunktionen
 - **Stundenplan:** Automatisch aus LSF importiert, in Tages- oder Wochenansicht, mit Detailfenster für jede Veranstaltung.
 - **Noten:** Dein *Noten- und Klassenspiegel* aus LSF: ECTS, Durchschnitt, Modulgruppen, Bemerkungen und die Notenverteilung jeder Prüfung.
 - **Bescheinigungen:** Immatrikulationsbescheinigungen (Deutsch/Englisch) und Leistungsübersichten als PDF zum Öffnen oder Teilen.
+- **Prüfungen & Belegungen:** Deine angemeldeten Prüfungen mit Countdown und die *Belegübersicht* mit dem Stand jedes Kurses.
+- **Ausfallende Veranstaltungen:** Die LSF-Liste der Ausfälle, direkt im Stundenplan markiert.
+- **Semestertermine:** Der akademische Kalender als Zeitskala: Vorlesungswochen, Prüfungszeiträume und Fristen.
+- **Startbildschirm-Widgets:** Nächste Veranstaltung, Veranstaltungen des Tages, Mensa und Semesterfortschritt.
+- **Eigene Navigation:** Alle Ziele der Navigationsleiste und des Menüs umsortieren, verschieben oder ausblenden.
 - **Moodle:** Automatische Anmeldung mit deinen gespeicherten HTW-Zugangsdaten, in einem eingebetteten Browser, der dem hellen/dunklen Design folgt.
 - **Webmail-Integration:** Schnelle Überprüfung im Hintergrund und lokale Benachrichtigungen für das HTW-Postfach.
 - **Mensa-Speiseplan:** Tägliches Essensangebot der HTW-Mensen, mit Ernährungsfiltern und Campusauswahl.
