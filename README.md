@@ -14,7 +14,8 @@
 <img src="assets/Screenshots/timetable_en.png" width="19%"> <img src="assets/Screenshots/mensa_en.png" width="19%"> <img src="assets/Screenshots/transport_en.png" width="19%"> <img src="assets/Screenshots/semester_en.png" width="19%"> <img src="assets/Screenshots/grades_en.png" width="19%"></p>
 
 *If you don't know which version to download:*
-* **arm64-v8a:** Almost certainly this one
+* **arm64-v8a:** For most phones
+* * **arm64-v8a:** For older (6+ years old) phones
 * **universal:** If the first one doesn't work
 
 ---
