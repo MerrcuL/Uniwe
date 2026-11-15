@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uniwe/widgets/copy_link_button.dart';
 import 'package:uniwe/l10n/app_localizations.dart';
 import 'package:uniwe/models/grades.dart';
 import 'package:uniwe/models/lecture_details.dart';
@@ -535,6 +536,24 @@ void main() {
       expect(await auth.downloadDocument(documents.first), fakePdf);
       expect(lsf.logins, loginsBefore + 1);
       auth.dispose();
+    });
+  });
+
+  group('copied links', () {
+    test('leave out session parameters', () {
+      expect(
+        shareableUrl(
+            'https://lsf.htw-berlin.de/qisserver/rds?state=user&type=0&asi=abc'),
+        'https://lsf.htw-berlin.de/qisserver/rds?state=user&type=0',
+      );
+      expect(
+        shareableUrl('https://moodle.htw-berlin.de/course/view.php?sesskey=x'),
+        'https://moodle.htw-berlin.de/course/view.php',
+      );
+      expect(
+        shareableUrl('https://moodle.htw-berlin.de/course/view.php?id=42'),
+        'https://moodle.htw-berlin.de/course/view.php?id=42',
+      );
     });
   });
 

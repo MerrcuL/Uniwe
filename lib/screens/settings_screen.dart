@@ -12,6 +12,8 @@ import 'about_screen.dart';
 import 'log_screen.dart';
 import 'login_screen.dart';
 import 'mensa_settings_screen.dart';
+import 'navigation_settings_screen.dart';
+import 'widgets_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -181,18 +183,36 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.splashEnabled,
                 onChanged: settings.updateSplashEnabled,
               ),
-              _SwitchTile(
-                icon: Icons.mail_outline_rounded,
-                title: l10n.get('emailInNavBar'),
-                subtitle: l10n.get('emailInNavBarSubtitle'),
-                value: settings.emailInNavBar,
-                onChanged: settings.updateEmailInNavBar,
+            ],
+          ),
+          const SizedBox(height: 12),
+          ListGroup(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.dock_outlined),
+                title: Text(l10n.get('navigation')),
+                subtitle: Text(l10n.get('navigationSubtitle')),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  HapticService.confirm(settings.hapticsEnabled);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const NavigationSettingsScreen(),
+                    ),
+                  );
+                },
               ),
-              _SwitchTile(
-                icon: Icons.label_off_outlined,
-                title: l10n.get('hideNavigationLabels'),
-                value: settings.hideLabels,
-                onChanged: settings.updateHideLabels,
+              ListTile(
+                leading: const Icon(Icons.widgets_outlined),
+                title: Text(l10n.get('homeWidgets')),
+                subtitle: Text(l10n.get('homeWidgetsSubtitle')),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  HapticService.confirm(settings.hapticsEnabled);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const WidgetsScreen()),
+                  );
+                },
               ),
             ],
           ),

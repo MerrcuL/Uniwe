@@ -115,6 +115,18 @@ class CacheService {
   /// Key for one week's timetable: e.g. "timetable_12_2026"
   static String weekKey(String weekStr) => '$timetablePrefix$weekStr';
 
+  /// Prefix of everything else that belongs to the signed-in account
+  /// (registered exams, enrolments) and must not survive a logout.
+  static const String personalPrefix = 'lsf_';
+  static const String examsKey = '${personalPrefix}exams';
+  static const String enrolmentsKey = '${personalPrefix}enrolments';
+
+  /// Key for the cancelled classes of one day: e.g. "cancelled_2026-11-16"
+  static String cancelledKey(String date) => 'cancelled_$date';
+
+  /// Key for the academic calendar in one language.
+  static String semesterKey(String languageCode) => 'semester_$languageCode';
+
   /// Key for one day's Mensa menu: e.g. "mensa_2037_2026-04-03"
   static String mensaKey(int canteenId, String date) =>
       'mensa_${canteenId}_$date';

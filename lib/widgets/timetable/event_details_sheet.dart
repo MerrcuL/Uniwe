@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/cancelled_lecture.dart';
 import '../../models/lecture_details.dart';
 import '../../models/timetable_event.dart';
 import '../../screens/lsf_browser_screen.dart';
@@ -19,17 +20,25 @@ import 'person_details_sheet.dart';
 /// The sheet appears immediately with what the timetable already knows and
 /// loads lecturer, credits and exam dates from LSF in place — tapping an
 /// event never waits on the network.
-Future<void> showEventDetails(BuildContext context, TimetableEvent event) {
+Future<void> showEventDetails(
+  BuildContext context,
+  TimetableEvent event, {
+  CancelledLecture? cancellation,
+}) {
   return showAppSheet<void>(
     context,
-    builder: (_) => _EventDetailsSheet(event: event),
+    builder: (_) =>
+        _EventDetailsSheet(event: event, cancellation: cancellation),
   );
 }
 
 class _EventDetailsSheet extends StatefulWidget {
-  const _EventDetailsSheet({required this.event});
+  const _EventDetailsSheet({required this.event, this.cancellation});
 
   final TimetableEvent event;
+
+  /// Set when the class is cancelled on the day it was opened from.
+  final CancelledLecture? cancellation;
 
   @override
   State<_EventDetailsSheet> createState() => _EventDetailsSheetState();
@@ -88,6 +97,47 @@ class _EventDetailsSheetState extends State<_EventDetailsSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(event.cleanTitle, style: theme.textTheme.headlineSmall),
+            if (widget.cancellation case final cancellation?)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: scheme.errorContainer,
+                    borderRadius: AppShapes.largeRadius,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.event_busy_outlined,
+                        color: scheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              l10n.get('cancelledThisDay'),
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: scheme.onErrorContainer,
+                              ),
+                            ),
+                            if (cancellation.remark.isNotEmpty)
+                              Text(
+                                cancellation.remark,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: scheme.onErrorContainer,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (type.isNotEmpty || frequency.isNotEmpty || event.isOverlapping)
               Padding(
                 padding: const EdgeInsets.only(top: 12),

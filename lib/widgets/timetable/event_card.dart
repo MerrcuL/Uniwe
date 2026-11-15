@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/cancelled_lecture.dart';
 import '../../models/timetable_event.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/timetable_text.dart';
@@ -13,11 +14,15 @@ class EventCard extends StatelessWidget {
     required this.event,
     required this.compact,
     required this.onTap,
+    this.cancellation,
   });
 
   final TimetableEvent event;
   final bool compact;
   final VoidCallback onTap;
+
+  /// Set when LSF lists this class as cancelled on the shown day.
+  final CancelledLecture? cancellation;
 
   @override
   Widget build(BuildContext context) {
@@ -26,16 +31,40 @@ class EventCard extends StatelessWidget {
     final text = theme.textTheme;
     final l10n = AppLocalizations.of(context);
     final semantic = SemanticColors.of(context);
-    final isExam = event.isExam;
+    final cancellation = this.cancellation;
+    final isCancelled = cancellation != null;
+    // A cancelled exam is shown as a cancelled class.
+    final isExam = event.isExam && !isCancelled;
 
-    // Exams take the error roles for the whole card so they cannot be missed.
-    final cardColor = isExam ? scheme.errorContainer : scheme.surfaceContainer;
-    final onCard = isExam ? scheme.onErrorContainer : scheme.onSurface;
+    // Exams take the error roles for the whole card so they cannot be missed;
+    // cancelled classes step back instead.
+    final cardColor = isExam
+        ? scheme.errorContainer
+        : isCancelled
+            ? scheme.surfaceContainerLow
+            : scheme.surfaceContainer;
+    final onCard = isExam
+        ? scheme.onErrorContainer
+        : isCancelled
+            ? scheme.onSurfaceVariant
+            : scheme.onSurface;
     final onCardMuted =
         isExam ? scheme.onErrorContainer : scheme.onSurfaceVariant;
-    final accent = isExam ? scheme.error : scheme.primary;
-    final timeColor = isExam ? scheme.error : scheme.primaryContainer;
-    final onTime = isExam ? scheme.onError : scheme.onPrimaryContainer;
+    final accent = isExam
+        ? scheme.error
+        : isCancelled
+            ? scheme.outline
+            : scheme.primary;
+    final timeColor = isExam
+        ? scheme.error
+        : isCancelled
+            ? scheme.surfaceContainerHighest
+            : scheme.primaryContainer;
+    final onTime = isExam
+        ? scheme.onError
+        : isCancelled
+            ? scheme.onSurfaceVariant
+            : scheme.onPrimaryContainer;
 
     final typeLabel = TimetableText.eventType(event, l10n);
     final frequency = TimetableText.frequency(event.frequency, l10n);
@@ -63,10 +92,36 @@ class EventCard extends StatelessWidget {
                     Text(
                       event.cleanTitle,
                       style: (compact ? text.titleSmall : text.titleMedium)
-                          ?.copyWith(color: onCard),
+                          ?.copyWith(
+                        color: onCard,
+                        decoration:
+                            isCancelled ? TextDecoration.lineThrough : null,
+                        decorationColor: onCard,
+                      ),
                       maxLines: compact ? 2 : 4,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (cancellation != null) ...[
+                      const SizedBox(height: 6),
+                      TonalPill(
+                        dense: compact,
+                        label: l10n.get('cancelled'),
+                        icon: Icons.event_busy_outlined,
+                        background: scheme.errorContainer,
+                        foreground: scheme.onErrorContainer,
+                      ),
+                      if (cancellation.remark.isNotEmpty && !compact) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          cancellation.remark,
+                          style: text.bodySmall?.copyWith(
+                            color: scheme.onSurface,
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
                     if (event.room.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       _IconLine(

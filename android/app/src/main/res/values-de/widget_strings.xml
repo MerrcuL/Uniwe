@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Texts of the home screen widgets. Everything else is translated in
+     lib/l10n/app_localizations.dart. -->
+<resources>
+    <string name="widget_next_class_name">Nächste Veranstaltung</string>
+    <string name="widget_next_class_description">Die laufende oder nächste Veranstaltung</string>
+    <string name="widget_today_name">Veranstaltungen</string>
+    <string name="widget_today_description">Deine Veranstaltungen von heute oder dem nächsten Tag</string>
+    <string name="widget_mensa_name">Mensa</string>
+    <string name="widget_mensa_description">Die Hauptgerichte des Tages</string>
+    <string name="widget_semester_name">Semester</string>
+    <string name="widget_semester_description">Semesterfortschritt und der nächste Termin oder die nächste Prüfung</string>
+    <string name="widget_today">Heute</string>
+    <string name="widget_tomorrow">Morgen</string>
+    <string name="widget_today_lower">heute</string>
+    <string name="widget_tomorrow_lower">morgen</string>
+    <string name="widget_in_days">in %1$d Tagen</string>
+    <string name="widget_until">bis %1$s</string>
+    <string name="widget_sign_in">Melde dich in Uniwe an, um deine Veranstaltungen zu sehen</string>
+    <string name="widget_open_to_update">Uniwe öffnen zum Aktualisieren</string>
+    <string name="widget_no_classes_until">Keine Veranstaltungen bis %1$s</string>
+    <string name="widget_now_until">Jetzt · bis %1$s</string>
+    <string name="widget_exam_on">Prüfung · %1$s</string>
+    <string name="widget_cancelled">Fällt aus</string>
+    <string name="widget_cancelled_title">Fällt aus: %1$s</string>
+    <string name="widget_more">+%1$d weitere</string>
+    <string name="widget_no_menu">Kein Speiseplan verfügbar</string>
+    <string name="widget_lectures_start">Vorlesungsbeginn %1$s</string>
+    <string name="widget_lectures_over">Vorlesungsfreie Zeit</string>
+    <string name="widget_week_of">Woche %1$d von %2$d</string>
+    <string name="widget_exam_in">Prüfung %2$s: %1$s</string>
+</resources>

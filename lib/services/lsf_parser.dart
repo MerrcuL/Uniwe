@@ -1,9 +1,12 @@
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as parser;
 
+import '../models/cancelled_lecture.dart';
+import '../models/enrolment.dart';
 import '../models/grades.dart';
 import '../models/lecture_details.dart';
 import '../models/person_details.dart';
+import '../models/registered_exam.dart';
 import '../models/timetable_event.dart';
 
 // Pure HTML → model functions. They are top-level so they can run on a
@@ -630,4 +633,251 @@ PersonDetails parsePersonDetailsHtml((String, String) input) {
     functions: functions,
     courses: courses,
   );
+}
+
+/// Parses LSF's public "Ausfallende Veranstaltungen" list of one day.
+List<CancelledLecture> parseCancelledLecturesHtml(String html) {
+  final document = parser.parse(html);
+  final lectures = <CancelledLecture>[];
+
+  for (final table in document.querySelectorAll('table')) {
+    final rows = _ownRows(table);
+    if (rows.isEmpty) continue;
+    final headers = _ownCells(rows.first, 'th').map(_cellText).toList();
+    if (!headers.contains('Beginn') ||
+        !headers.any((h) => h.startsWith('Titel'))) {
+      continue;
+    }
+
+    for (final row in rows.skip(1)) {
+      final cells = _ownCells(row, 'td');
+      if (cells.isEmpty) continue;
+      // LSF leaves the lecturer cell out entirely when it has no names.
+      var columns = headers;
+      if (cells.length == headers.length - 1) {
+        columns = [
+          for (final h in headers)
+            if (!h.contains('Lehrperson')) h,
+        ];
+      }
+      dom.Element? cell(bool Function(String h) test) {
+        final i = columns.indexWhere(test);
+        return i >= 0 && i < cells.length ? cells[i] : null;
+      }
+
+      String text(bool Function(String h) test) {
+        final c = cell(test);
+        return c == null ? '' : _cellText(c);
+      }
+
+      final titleCell = cell((h) => h.startsWith('Titel'));
+      final title = titleCell == null ? '' : _cellText(titleCell);
+      if (title.isEmpty) continue;
+      final href = titleCell?.querySelector('a')?.attributes['href'] ?? '';
+      final publishId = RegExp(r'publishid=(\d+)').firstMatch(href)?.group(1);
+
+      lectures.add(CancelledLecture(
+        start: text((h) => h == 'Beginn'),
+        end: text((h) => h == 'Ende'),
+        number: text((h) => h.startsWith('Nr')),
+        title: title,
+        publishId: publishId,
+        building: text((h) => h.startsWith('Gebäude')),
+        room: text((h) => h == 'Raum'),
+        group: text((h) => h.startsWith('Parallelgruppe')),
+        lecturers: text((h) => h.contains('Lehrperson')),
+        remark: text((h) => h.startsWith('Bemerkung')),
+      ));
+    }
+  }
+  return lectures;
+}
+
+/// Parses "Info über angemeldete Prüfungen".
+///
+/// Only the exam tables are read; the box with name, matriculation number
+/// and address above them is ignored.
+ExamRegistrations parseRegisteredExamsHtml(String html) {
+  final document = parser.parse(html);
+  final programs = <String>[];
+  final exams = <RegisteredExam>[];
+
+  for (final table in document.querySelectorAll('table')) {
+    final rows = _ownRows(table);
+    // Footnote marks ("Prüfungsdatum1") are part of the header text.
+    final headerIndex = rows.indexWhere((row) {
+      final cells = _ownCells(row, 'th').map(_cellText);
+      return cells.any((c) => c == 'PrNr' || c.startsWith('Prüfungsname'));
+    });
+    if (headerIndex < 0) continue;
+
+    var program = '';
+    for (final row in rows.take(headerIndex)) {
+      final text = _cellText(row);
+      if (text.isNotEmpty) program = text;
+    }
+    if (program.isNotEmpty && !programs.contains(program)) {
+      programs.add(program);
+    }
+
+    final headers = _ownCells(rows[headerIndex], 'th').map(_cellText).toList();
+    int col(String start) => headers.indexWhere((h) => h.startsWith(start));
+    final numberCol = col('PrNr');
+    final nameCol = col('Prüfungsname');
+    final examinerCol = col('Prüfer');
+    final semesterCol = col('Semester');
+    final registeredCol = col('Anmeldedatum');
+    final periodCol = col('Termin');
+    final dateCol = col('Prüfungsdatum');
+    final attemptCol = col('Versuch');
+    if (nameCol < 0) continue;
+
+    for (final row in rows.skip(headerIndex + 1)) {
+      final cells = _ownCells(row, 'td');
+      if (cells.isEmpty) continue;
+      final values = <String>[];
+      for (final cell in cells) {
+        final span = int.tryParse(cell.attributes['colspan'] ?? '') ?? 1;
+        values.add(_cellText(cell));
+        for (var i = 1; i < span; i++) {
+          values.add('');
+        }
+      }
+      String at(int i) => i >= 0 && i < values.length ? values[i] : '';
+      final name = at(nameCol);
+      if (name.isEmpty) continue;
+      exams.add(RegisteredExam(
+        number: at(numberCol),
+        name: name,
+        examiner: at(examinerCol),
+        semester: at(semesterCol),
+        registeredOn: at(registeredCol),
+        period: at(periodCol),
+        date: at(dateCol),
+        attempt: at(attemptCol),
+        program: program,
+      ));
+    }
+  }
+  return ExamRegistrations(programs: programs, exams: exams);
+}
+
+String _nodeText(String text) =>
+    text.replaceAll(' ', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+/// Parses the "Belegübersicht": the courses of the current semester with
+/// the state of the enrolment and their dates.
+List<Enrolment> parseEnrolmentsHtml(String html) {
+  final document = parser.parse(html);
+  final enrolments = <Enrolment>[];
+  final statusDate = RegExp(r'\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2})?');
+
+  for (final container
+      in document.querySelectorAll('div.Container_VeranstAus')) {
+    // The semester is the heading right before the container.
+    var semester = '';
+    for (dom.Element? e = container.previousElementSibling;
+        e != null;
+        e = e.previousElementSibling) {
+      if (e.localName == 'h2') {
+        semester = _cellText(e).replaceFirst(RegExp(r':$'), '').trim();
+        break;
+      }
+    }
+
+    String? number;
+    String? title;
+    String? publishId;
+
+    for (final child in container.children) {
+      if (child.localName == 'h2') {
+        final link = child.querySelector('a');
+        if (link == null) continue;
+        final text = _cellText(link);
+        final match = RegExp(r'^(\d+)\s+(.*)$').firstMatch(text);
+        number = match?.group(1) ?? '';
+        title = match?.group(2) ?? text;
+        publishId = RegExp(r'publishid=(\d+)')
+            .firstMatch(link.attributes['href'] ?? '')
+            ?.group(1);
+        continue;
+      }
+      if (!child.classes.contains('Leistungen_Inhalt') || title == null) {
+        continue;
+      }
+
+      // "Gruppe: 1. Zug <br> <span>zugelassen</span> : 09.09.2026 06:50:20"
+      final statuses = <EnrolmentStatus>[];
+      var group = '';
+      var pending = -1;
+      for (final node in child.nodes) {
+        if (node is dom.Text) {
+          final text = _nodeText(node.text);
+          if (pending >= 0) {
+            final date = statusDate.firstMatch(text)?.group(0);
+            if (date != null) {
+              final s = statuses[pending];
+              statuses[pending] = EnrolmentStatus(
+                label: s.label,
+                group: s.group,
+                positive: s.positive,
+                date: date,
+              );
+            }
+            pending = -1;
+          }
+          // The group of the next status; "Gruppenpriorität: 2" is not one.
+          final groupMatch =
+              RegExp(r'(?:^|\s)Gruppe:\s*(.+)$').firstMatch(text);
+          if (groupMatch != null) group = groupMatch.group(1)!.trim();
+        } else if (node is dom.Element && node.localName == 'span') {
+          final label = _cellText(node);
+          if (label.isEmpty) continue;
+          statuses.add(EnrolmentStatus(
+            label: label,
+            group: group,
+            positive: node.classes.contains('grueneWarnung'),
+          ));
+          pending = statuses.length - 1;
+        }
+      }
+
+      final dates = <EnrolmentDate>[];
+      for (final table in child.querySelectorAll('table')) {
+        final rows = _ownRows(table);
+        if (rows.isEmpty) continue;
+        final headers = _ownCells(rows.first, 'th').map(_cellText).toList();
+        if (!headers.contains('Tag') || !headers.contains('Zeit')) continue;
+        for (final row in rows.skip(1)) {
+          final cells = _ownCells(row, 'td');
+          if (cells.isEmpty) continue;
+          String at(String header) {
+            final i = headers.indexWhere((h) => h.startsWith(header));
+            return i >= 0 && i < cells.length ? _cellText(cells[i]) : '';
+          }
+
+          dates.add(EnrolmentDate(
+            day: at('Tag'),
+            time: at('Zeit').replaceAll(' bis ', ' – '),
+            rhythm: at('Rhythmus'),
+            duration: at('Dauer'),
+            room: at('Raum'),
+            lecturer: at('Lehrperson'),
+            note: at('Hinweis'),
+          ));
+        }
+      }
+
+      enrolments.add(Enrolment(
+        number: number ?? '',
+        title: title,
+        publishId: publishId,
+        semester: semester,
+        statuses: statuses,
+        dates: dates,
+      ));
+      title = null;
+    }
+  }
+  return enrolments;
 }

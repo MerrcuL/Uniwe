@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colour roles of the home screen widgets (Material 3 names). -->
+<resources>
+    <color name="widget_surface">#F9FAEF</color>
+    <color name="widget_surface_container">#EDEFE4</color>
+    <color name="widget_on_surface">#1A1C16</color>
+    <color name="widget_on_surface_variant">#44483D</color>
+    <color name="widget_outline">#75796C</color>
+    <color name="widget_primary">#4C662B</color>
+    <color name="widget_primary_container">#DCE7C8</color>
+    <color name="widget_on_primary_container">#151E0B</color>
+    <color name="widget_error">#BA1A1A</color>
+    <color name="widget_error_container">#FFDAD6</color>
+    <color name="widget_on_error_container">#410002</color>
+</resources>

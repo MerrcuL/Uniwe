@@ -19,6 +19,7 @@ class WeekGrid extends StatelessWidget {
     required this.dayCount,
     required this.onEventTap,
     required this.onDayTap,
+    this.isCancelled,
   });
 
   final IsoWeek week;
@@ -28,6 +29,9 @@ class WeekGrid extends StatelessWidget {
   final int dayCount;
   final ValueChanged<TimetableEvent> onEventTap;
   final ValueChanged<DateTime> onDayTap;
+
+  /// Whether LSF lists [event] as cancelled on [date].
+  final bool Function(DateTime date, TimetableEvent event)? isCancelled;
 
   static const double _timeColumnWidth = 44;
   static const double _headerHeight = 60;
@@ -137,6 +141,7 @@ class WeekGrid extends StatelessWidget {
                           for (final placed in layoutDayEvents(schedule.byDay[d]))
                             _positionedEvent(
                               placed,
+                              date: week.day(d),
                               dayLeft: _timeColumnWidth + d * dayWidth,
                               dayWidth: dayWidth,
                               startHour: startHour,
@@ -156,6 +161,7 @@ class WeekGrid extends StatelessWidget {
 
   Widget _positionedEvent(
     PlacedEvent placed, {
+    required DateTime date,
     required double dayLeft,
     required double dayWidth,
     required int startHour,
@@ -175,6 +181,7 @@ class WeekGrid extends StatelessWidget {
       child: _GridEventTile(
         event: event,
         height: height,
+        cancelled: isCancelled?.call(date, event) ?? false,
         onTap: () => onEventTap(event),
       ),
     );
@@ -251,19 +258,27 @@ class _GridEventTile extends StatelessWidget {
     required this.event,
     required this.height,
     required this.onTap,
+    this.cancelled = false,
   });
 
   final TimetableEvent event;
   final double height;
   final VoidCallback onTap;
+  final bool cancelled;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background =
-        event.isExam ? scheme.errorContainer : scheme.primaryContainer;
-    final foreground =
-        event.isExam ? scheme.onErrorContainer : scheme.onPrimaryContainer;
+    final background = cancelled
+        ? scheme.surfaceContainerHighest
+        : event.isExam
+            ? scheme.errorContainer
+            : scheme.primaryContainer;
+    final foreground = cancelled
+        ? scheme.onSurfaceVariant
+        : event.isExam
+            ? scheme.onErrorContainer
+            : scheme.onPrimaryContainer;
 
     // Very short events have no room for text; never ask for zero lines.
     final contentHeight = height - 2 - 8;
@@ -300,6 +315,10 @@ class _GridEventTile extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                               color: foreground,
                               height: 1.2,
+                              decoration: cancelled
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              decorationColor: foreground,
                             ),
                             maxLines: titleLines,
                             overflow: TextOverflow.ellipsis,

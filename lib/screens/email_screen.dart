@@ -10,7 +10,10 @@ import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../services/haptic_service.dart';
 import '../services/settings_service.dart';
+import '../utils/route_transition.dart';
 import '../utils/webview_dark_mode.dart';
+import '../widgets/hide_on_route_exit.dart';
+import '../widgets/copy_link_button.dart';
 import '../widgets/expressive.dart';
 import 'login_screen.dart';
 
@@ -35,6 +38,9 @@ class _EmailScreenState extends State<EmailScreen> {
   bool _hasError = false;
   bool _isDark = false;
   bool _started = false;
+
+  /// Whether the slide-in has finished; the loading indicator waits for it.
+  bool _settled = false;
   late bool _wasAuthenticated;
 
   /// Identifies the newest [_initWebView] run; older ones abandon their work.
@@ -148,8 +154,16 @@ class _EmailScreenState extends State<EmailScreen> {
       });
     }
 
+    // The sign-in runs during the slide-in (when opened from the menu); the
+    // web view (and its cookie store, which starts the browser engine) only
+    // once the page is in place.
+    final transition = routeTransitionDone(context);
+    transition.then((_) {
+      if (mounted && !_settled) setState(() => _settled = true);
+    });
     final cookies = await _auth.getWebmailCookies();
-    if (!mounted || ticket != _initTicket) return;
+    await transition;
+    if (!mounted || ticket != _initTicket || routeIsClosing(context)) return;
 
     if (cookies == null || cookies.isEmpty) {
       setState(() {
@@ -222,6 +236,7 @@ class _EmailScreenState extends State<EmailScreen> {
             onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
+            CopyLinkButton(controller: _controller),
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               tooltip: l10n.get('refresh'),
@@ -290,12 +305,15 @@ class _EmailScreenState extends State<EmailScreen> {
           children: [
             if (controller != null)
               Positioned.fill(
-                child: RepaintBoundary(
-                  child: _buildWebView(controller),
+                child: HideOnRouteExit(
+                  child: RepaintBoundary(child: _buildWebView(controller)),
                 ),
               ),
             if (_isLoading && controller == null)
-              const Positioned.fill(child: LoadingState())
+              Positioned.fill(
+                child:
+                    _settled ? const LoadingState() : const SizedBox.shrink(),
+              )
             else if (_isLoading)
               const Positioned(
                 top: 0,

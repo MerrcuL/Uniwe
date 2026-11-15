@@ -35,6 +35,17 @@ abstract final class Formats {
   /// "09.11."
   static String dayMonth(DateTime date) => _date('dd.MM.').format(date);
 
+  /// "09.11.2026"
+  static String date(DateTime date) => _date('dd.MM.yyyy').format(date);
+
+  /// "Nov" / "Nov."
+  static String monthShort(DateTime date, String locale) =>
+      _date('MMM', locale).format(date).replaceAll('.', '');
+
+  /// "Mo, 09.11." / "Mon, 09.11."
+  static String weekdayDate(DateTime date, String locale) =>
+      '${weekdayShort(date, locale)}, ${dayMonth(date)}';
+
   /// "2026-11-09" (OpenMensa date keys).
   static String isoDate(DateTime date) => _date('yyyy-MM-dd').format(date);
 

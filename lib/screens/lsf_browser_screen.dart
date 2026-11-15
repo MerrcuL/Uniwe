@@ -5,7 +5,10 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
+import '../utils/route_transition.dart';
 import '../utils/webview_dark_mode.dart';
+import '../widgets/hide_on_route_exit.dart';
+import '../widgets/copy_link_button.dart';
 import '../widgets/expressive.dart';
 
 /// LSF in a web view that shares the app's session.
@@ -29,6 +32,9 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
   bool _isLoading = true;
   bool _isDark = false;
   bool _started = false;
+
+  /// Whether the slide-in has finished; the loading indicator waits for it.
+  bool _settled = false;
 
   @override
   void didChangeDependencies() {
@@ -54,8 +60,16 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
 
   Future<void> _initWebView() async {
     final authService = context.read<AuthService>();
-    // Signs in first if the session has not been established yet.
+    final transition = routeTransitionDone(context);
+    transition.then((_) {
+      if (mounted && !_settled) setState(() => _settled = true);
+    });
+    // Signs in first if the session has not been established yet. This runs
+    // during the slide-in; the web view (and its cookie store, which starts
+    // the browser engine) is only touched once the page is in place.
     final cookies = await authService.getLsfCookies();
+    await transition;
+    if (!mounted || routeIsClosing(context)) return;
     final cookieManager = WebViewCookieManager();
 
     for (final entry in cookies.entries) {
@@ -129,6 +143,7 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
             onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
+            CopyLinkButton(controller: _controller),
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               tooltip: l10n.get('refresh'),
@@ -144,9 +159,10 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
         ),
         body: Builder(
           builder: (context) {
-            final animation = ModalRoute.of(context)?.animation;
             final controller = _controller;
-            if (controller == null) return const LoadingState();
+            if (controller == null) {
+              return _settled ? const LoadingState() : const SizedBox.shrink();
+            }
 
             final platform = controller.platform;
             final Widget webView = RepaintBoundary(
@@ -163,9 +179,7 @@ class _LsfBrowserScreenState extends State<LsfBrowserScreen> {
             return Stack(
               children: [
                 Positioned.fill(
-                  child: animation != null
-                      ? FadeTransition(opacity: animation, child: webView)
-                      : webView,
+                  child: HideOnRouteExit(child: webView),
                 ),
                 if (_isLoading)
                   const Positioned(

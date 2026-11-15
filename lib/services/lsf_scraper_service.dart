@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/cancelled_lecture.dart';
+import '../models/enrolment.dart';
 import '../models/grades.dart';
 import '../models/lecture_details.dart';
 import '../models/person_details.dart';
+import '../models/registered_exam.dart';
 import '../models/timetable_event.dart';
 import '../utils/cookies.dart';
 import 'exceptions.dart';
@@ -292,6 +295,69 @@ class LsfScraperService {
     }
     _asi = null;
     throw SessionExpiredException();
+  }
+
+  static final Uri _registeredExamsUrl = Uri.parse(_baseUrl).replace(
+    queryParameters: {
+      'state': 'posinfo',
+      'application': 'sospos',
+      'moduleParameter': 'Student',
+      'navigationPosition': 'functions,infoexams',
+      'breadcrumb': 'registeredExams',
+      'topitem': 'functions',
+      'subitem': 'infoexams',
+    },
+  );
+
+  static final Uri _enrolmentsUrl = Uri.parse(_baseUrl).replace(
+    queryParameters: {
+      'state': 'wscheck',
+      'wscheck': 'leistungen',
+      'navigationPosition': 'functions,myLecturesWScheck',
+      'breadcrumb': 'LoginInfo_Leistungen',
+      'topitem': 'functions',
+      'subitem': 'myLecturesWScheck',
+    },
+  );
+
+  /// The exams the student is registered for ("Angemeldete Prüfungen").
+  Future<ExamRegistrations> fetchRegisteredExams() async {
+    final html = await _getWithAsi(_registeredExamsUrl, 'registered exams');
+    return compute(parseRegisteredExamsHtml, html);
+  }
+
+  /// The courses of the current semester ("Belegübersicht").
+  Future<List<Enrolment>> fetchEnrolments() async {
+    final html = await _getWithAsi(_enrolmentsUrl, 'enrolments');
+    return compute(parseEnrolmentsHtml, html);
+  }
+
+  /// The classes LSF lists as cancelled on [date]. The list is public, so
+  /// this works without a session (and never ends one).
+  Future<List<CancelledLecture>> fetchCancelledLectures(DateTime date) async {
+    String two(int n) => n.toString().padLeft(2, '0');
+    final url = Uri.parse(_baseUrl).replace(
+      queryParameters: {
+        'state': 'currentLectures',
+        'type': '1',
+        'next': 'CurrentLectures.vm',
+        'nextdir': 'ressourcenManager',
+        'HISCalendar_Date': '${two(date.day)}.${two(date.month)}.${date.year}',
+      },
+    );
+    final response = await _client.get(
+      url,
+      headers: {'User-Agent': _userAgent},
+    ).timeout(_timeout);
+    if (response.statusCode != 200) {
+      _logger.warning(
+          'Cancelled lectures unavailable (HTTP ${response.statusCode})');
+      throw HttpStatusException(response.statusCode, 'cancelled lectures');
+    }
+    final lectures = await compute(parseCancelledLecturesHtml, response.body);
+    _logger.info('Fetched ${lectures.length} cancelled lectures '
+        'for ${two(date.day)}.${two(date.month)}.');
+    return lectures;
   }
 
   static bool isPdf(List<int> bytes) =>

@@ -9,6 +9,17 @@ abstract final class AppTab {
   static const int email = 2;
   static const int transport = 3;
   static const int more = 4;
+  static const int lsf = 5;
+  static const int moodle = 6;
+  static const int grades = 7;
+  static const int exams = 8;
+  static const int enrolments = 9;
+  static const int cancelled = 10;
+  static const int semester = 11;
+  static const int certificates = 12;
+
+  /// Number of ids above (the size of the tab stack).
+  static const int count = 13;
 }
 
 /// App-wide UI events shared between the navigation shell and its tabs.
@@ -28,6 +39,16 @@ abstract final class AppEvents {
   static Stream<int> get tabReselected => _reselected.stream;
 
   static void reselectTab(int index) => _reselected.add(index);
+
+  static final StreamController<String> _openRequests =
+      StreamController<String>.broadcast();
+
+  /// Emits the id of a destination that should be brought on screen, e.g.
+  /// because its home screen widget was tapped.
+  static Stream<String> get openRequests => _openRequests.stream;
+
+  static void requestOpen(String destinationId) =>
+      _openRequests.add(destinationId);
 
   /// Lets a tab consume the system back gesture (e.g. web view history).
   static void registerBackHandler(int tab, Future<bool> Function() handler) {

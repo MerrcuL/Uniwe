@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 "extra large" corner; newer launchers supply their own. -->
+    <dimen name="widget_radius">28dp</dimen>
+    <dimen name="widget_padding">16dp</dimen>
+</resources>

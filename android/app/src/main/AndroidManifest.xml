@@ -38,12 +38,61 @@
                 <data android:scheme="https" android:host="lsf.htw-berlin.de" />
                 <data android:scheme="https" android:host="htw-berlin.de" />
             </intent-filter>
+            <!-- Taps on home screen widgets (home_widget plugin). -->
+            <intent-filter>
+                <action android:name="es.antonborri.home_widget.action.LAUNCH" />
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Home screen widgets, see kotlin/.../widgets. -->
+        <receiver
+            android:name=".widgets.NextClassWidget"
+            android:exported="false"
+            android:label="@string/widget_next_class_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_next_class" />
+        </receiver>
+        <receiver
+            android:name=".widgets.TodayWidget"
+            android:exported="false"
+            android:label="@string/widget_today_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today" />
+        </receiver>
+        <receiver
+            android:name=".widgets.MensaWidget"
+            android:exported="false"
+            android:label="@string/widget_mensa_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mensa" />
+        </receiver>
+        <receiver
+            android:name=".widgets.SemesterWidget"
+            android:exported="false"
+            android:label="@string/widget_semester_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_semester" />
+        </receiver>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.documents"

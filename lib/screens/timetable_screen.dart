@@ -5,9 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../app_events.dart';
 import '../l10n/app_localizations.dart';
+import '../models/cancelled_lecture.dart';
 import '../models/timetable_event.dart';
 import '../services/auth_service.dart';
+import '../services/cancellation_store.dart';
 import '../services/haptic_service.dart';
+import '../services/home_widget_service.dart';
 import '../services/settings_service.dart';
 import '../services/timetable_store.dart';
 import '../theme/app_theme.dart';
@@ -34,6 +37,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
   late final AuthService _auth;
   late final TimetableStore _store;
+  late final CancellationStore _cancellations;
 
   /// The selected day. May be a weekend day while weekends are hidden; always
   /// read it through [_effectiveDate].
@@ -50,6 +54,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
     final settings = context.read<SettingsService>();
     _auth = context.read<AuthService>();
     _store = TimetableStore(fetch: _auth.fetchTimetable);
+    _cancellations = context.read<CancellationStore>();
     _isWeekView = settings.timetableIsWeekView;
     _wasAuthenticated = _auth.isAuthenticated;
 
@@ -104,7 +109,12 @@ class _TimetableScreenState extends State<TimetableScreen> {
     if (!mounted || !_auth.isAuthenticated) return;
     final date = _effectiveDate;
     final week = IsoWeek.fromDate(date);
-    _store.refresh(week);
+    _store.refresh(week).then((_) => _afterWeekLoaded(week));
+    // The week after this one feeds the home screen widgets over the
+    // weekend (and makes paging to it instant).
+    if (week == IsoWeek.current()) {
+      _store.refresh(week.next).then((_) => _afterWeekLoaded(week.next));
+    }
 
     if (!_isWeekView) {
       final lastDay = _showWeekends ? DateTime.sunday : DateTime.friday;
@@ -113,12 +123,27 @@ class _TimetableScreenState extends State<TimetableScreen> {
     }
   }
 
+  /// Once a week is on screen: ask LSF which of its classes are cancelled
+  /// and hand the fresh timetable to the home screen widgets.
+  void _afterWeekLoaded(IsoWeek week, {bool force = false}) {
+    if (!mounted) return;
+    final schedule = _store.schedule(week);
+    if (schedule == null) return;
+    for (var d = 0; d < 7; d++) {
+      final day = week.day(d);
+      if (schedule.byDay[d].isEmpty || !CancellationStore.isInRange(day)) {
+        continue;
+      }
+      _cancellations.refresh(day, force: force);
+    }
+    HomeWidgetService.instance.sync();
+  }
+
   Future<void> _forceRefresh() async {
     if (!_auth.isAuthenticated) return;
-    final ok = await _store.refresh(
-      IsoWeek.fromDate(_effectiveDate),
-      force: true,
-    );
+    final week = IsoWeek.fromDate(_effectiveDate);
+    final ok = await _store.refresh(week, force: true);
+    if (ok) _afterWeekLoaded(week, force: true);
     if (!ok && mounted && _auth.isAuthenticated) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
@@ -157,9 +182,9 @@ class _TimetableScreenState extends State<TimetableScreen> {
     context.read<SettingsService>().updateTimetableIsWeekView(_isWeekView);
   }
 
-  void _openEvent(TimetableEvent event) {
+  void _openEvent(TimetableEvent event, [CancelledLecture? cancellation]) {
     HapticService.confirm(context.read<SettingsService>().hapticsEnabled);
-    showEventDetails(context, event);
+    showEventDetails(context, event, cancellation: cancellation);
   }
 
   @override
@@ -368,7 +393,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
 
   Widget _buildWeekPage(IsoWeek week, int dayCount) {
     return ListenableBuilder(
-      listenable: _store,
+      listenable: Listenable.merge([_store, _cancellations]),
       builder: (context, _) {
         final schedule = _store.schedule(week);
         final placeholder = _buildPlaceholder(week, schedule);
@@ -377,7 +402,16 @@ class _TimetableScreenState extends State<TimetableScreen> {
           week: week,
           schedule: schedule!,
           dayCount: dayCount,
-          onEventTap: _openEvent,
+          isCancelled: (date, event) =>
+              _cancellations.match(date, event) != null,
+          onEventTap: (event) {
+            // The grid does not say which day was tapped; the event does.
+            final day = event.dayIndex < 0 ? null : week.day(event.dayIndex);
+            _openEvent(
+              event,
+              day == null ? null : _cancellations.match(day, event),
+            );
+          },
           onDayTap: (day) {
             _haptic();
             _selected.value = day;
@@ -392,7 +426,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   Widget _buildDayPage(DateTime date) {
     final week = IsoWeek.fromDate(date);
     return ListenableBuilder(
-      listenable: _store,
+      listenable: Listenable.merge([_store, _cancellations]),
       builder: (context, _) {
         final schedule = _store.schedule(week);
         final placeholder = _buildPlaceholder(week, schedule);
@@ -409,7 +443,11 @@ class _TimetableScreenState extends State<TimetableScreen> {
                   title: l10n.get('noClasses'),
                   message: l10n.get('enjoyFreeTime'),
                 )
-              : _DayEventList(events: events, onEventTap: _openEvent),
+              : _DayEventList(
+                  events: events,
+                  cancellationOf: (event) => _cancellations.match(date, event),
+                  onEventTap: _openEvent,
+                ),
         );
       },
     );
@@ -417,10 +455,16 @@ class _TimetableScreenState extends State<TimetableScreen> {
 }
 
 class _DayEventList extends StatelessWidget {
-  const _DayEventList({required this.events, required this.onEventTap});
+  const _DayEventList({
+    required this.events,
+    required this.cancellationOf,
+    required this.onEventTap,
+  });
 
   final List<TimetableEvent> events;
-  final ValueChanged<TimetableEvent> onEventTap;
+  final CancelledLecture? Function(TimetableEvent event) cancellationOf;
+  final void Function(TimetableEvent event, CancelledLecture? cancellation)
+      onEventTap;
 
   @override
   Widget build(BuildContext context) {
@@ -438,10 +482,12 @@ class _DayEventList extends StatelessWidget {
       itemCount: events.length,
       itemBuilder: (context, index) {
         final event = events[index];
+        final cancellation = cancellationOf(event);
         final card = EventCard(
           event: event,
           compact: compact,
-          onTap: () => onEventTap(event),
+          cancellation: cancellation,
+          onTap: () => onEventTap(event, cancellation),
         );
         if (index == events.length - 1) return card;
 

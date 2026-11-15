@@ -17,6 +17,8 @@ import 'l10n/app_localizations.dart';
 import 'screens/main_screen.dart';
 import 'services/auth_service.dart';
 import 'services/cache_service.dart';
+import 'services/cancellation_store.dart';
+import 'services/home_widget_service.dart';
 import 'services/log_service.dart';
 import 'services/lsf_scraper_service.dart';
 import 'services/settings_service.dart';
@@ -52,6 +54,11 @@ void main() async {
           update: (context, scraper, logger, auth) =>
               auth ?? AuthService(scraper, logger),
         ),
+        ChangeNotifierProvider(
+          create: (context) => CancellationStore(
+            fetch: context.read<LsfScraperService>().fetchCancelledLectures,
+          ),
+        ),
       ],
       child: const UniweApp(),
     ),
@@ -77,6 +84,11 @@ class _UniweAppState extends State<UniweApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadSystemPalette();
+    // The home screen widgets follow the app's language, campus and account.
+    HomeWidgetService.instance.configure(
+      settings: context.read<SettingsService>(),
+      auth: context.read<AuthService>(),
+    );
   }
 
   @override
@@ -88,7 +100,10 @@ class _UniweAppState extends State<UniweApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // The user may have changed wallpaper or colour style in the meantime.
-    if (state == AppLifecycleState.resumed) _loadSystemPalette();
+    if (state == AppLifecycleState.resumed) {
+      _loadSystemPalette();
+      HomeWidgetService.instance.sync();
+    }
   }
 
   Future<void> _loadSystemPalette() async {

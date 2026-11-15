@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Colour roles of the home screen widgets (Material 3 names). -->
+<resources>
+    <color name="widget_surface">@android:color/system_neutral1_50</color>
+    <color name="widget_surface_container">@android:color/system_neutral2_100</color>
+    <color name="widget_on_surface">@android:color/system_neutral1_900</color>
+    <color name="widget_on_surface_variant">@android:color/system_neutral2_700</color>
+    <color name="widget_outline">@android:color/system_neutral2_500</color>
+    <color name="widget_primary">@android:color/system_accent1_600</color>
+    <color name="widget_primary_container">@android:color/system_accent1_100</color>
+    <color name="widget_on_primary_container">@android:color/system_accent1_900</color>
+    <color name="widget_error">#BA1A1A</color>
+    <color name="widget_error_container">#FFDAD6</color>
+    <color name="widget_on_error_container">#410002</color>
+</resources>

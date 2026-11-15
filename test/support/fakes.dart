@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uniwe/l10n/app_localizations.dart';
 import 'package:uniwe/services/auth_service.dart';
 import 'package:uniwe/services/cache_service.dart';
+import 'package:uniwe/services/cancellation_store.dart';
 import 'package:uniwe/services/log_service.dart';
 import 'package:uniwe/services/lsf_scraper_service.dart';
 import 'package:uniwe/services/secure_storage_service.dart';
@@ -102,6 +103,10 @@ class TestApp {
         ChangeNotifierProvider.value(value: settings),
         Provider.value(value: scraper),
         ChangeNotifierProvider.value(value: auth),
+        ChangeNotifierProvider(
+          create: (_) =>
+              CancellationStore(fetch: scraper.fetchCancelledLectures),
+        ),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

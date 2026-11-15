@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'fake_pages.dart';
+
+export 'fake_pages.dart';
+
 /// Fictional LSF pages in the markup of the real ones ("Noten- und
 /// Klassenspiegel", achievement page, "Bescheinigungen" menu), with a layout
 /// table around the content like LSF.
@@ -250,6 +254,12 @@ class FakeLsf {
         return page(fakeDocumentsHtml);
       case 'htmlbesch':
         return page(fakeAchievementHtml);
+      case 'posinfo':
+        return page(fakeRegisteredExamsHtml());
+      case 'wscheck':
+        return page(fakeEnrolmentsHtml);
+      case 'currentLectures':
+        return page(fakeCancelledHtml);
       case 'notenspiegelStudent':
         if (params['next'] == 'tree.vm') return page(fakeGradeTreeHtml);
         if (params['struct'] == 'abschluss') return page(fakeDistributionHtml);

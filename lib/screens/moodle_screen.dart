@@ -6,7 +6,10 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
+import '../utils/route_transition.dart';
 import '../utils/webview_dark_mode.dart';
+import '../widgets/hide_on_route_exit.dart';
+import '../widgets/copy_link_button.dart';
 import '../widgets/expressive.dart';
 
 /// Moodle in a web view, signed in automatically with the stored HTW
@@ -32,6 +35,9 @@ class _MoodleScreenState extends State<MoodleScreen> {
   bool _hasError = false;
   bool _isDark = false;
   bool _started = false;
+
+  /// Whether the slide-in has finished; the loading indicator waits for it.
+  bool _settled = false;
   int _silentLogins = 0;
 
   @override
@@ -59,8 +65,11 @@ class _MoodleScreenState extends State<MoodleScreen> {
   Color get _backgroundColor => _isDark ? Colors.black : Colors.white;
 
   /// Hands the Moodle session to the web view's cookie store.
-  Future<bool> _applySession({bool fresh = false}) async {
-    final cookies = await _auth.getMoodleCookies(fresh: fresh);
+  Future<bool> _applySession({
+    bool fresh = false,
+    Map<String, String>? cookies,
+  }) async {
+    cookies ??= await _auth.getMoodleCookies(fresh: fresh);
     if (cookies == null || cookies.isEmpty) return false;
     final cookieManager = WebViewCookieManager();
     for (final entry in cookies.entries) {
@@ -83,7 +92,16 @@ class _MoodleScreenState extends State<MoodleScreen> {
         _hasError = false;
       });
     }
-    final ok = await _applySession();
+    // The sign-in runs during the slide-in; the web view (and its cookie
+    // store, which starts the browser engine) only once the page is in place.
+    final transition = routeTransitionDone(context);
+    transition.then((_) {
+      if (mounted && !_settled) setState(() => _settled = true);
+    });
+    final cookies = await _auth.getMoodleCookies();
+    await transition;
+    if (!mounted || routeIsClosing(context)) return;
+    final ok = await _applySession(cookies: cookies);
     if (!mounted) return;
     if (!ok) {
       setState(() {
@@ -190,6 +208,7 @@ class _MoodleScreenState extends State<MoodleScreen> {
             onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
+            CopyLinkButton(controller: _controller),
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               tooltip: l10n.get('refresh'),
@@ -231,9 +250,10 @@ class _MoodleScreenState extends State<MoodleScreen> {
     }
 
     final controller = _controller;
-    if (controller == null) return const LoadingState();
+    if (controller == null) {
+      return _settled ? const LoadingState() : const SizedBox.shrink();
+    }
 
-    final animation = ModalRoute.of(context)?.animation;
     final platform = controller.platform;
     final Widget webView = RepaintBoundary(
       child: platform is AndroidWebViewController
@@ -252,9 +272,7 @@ class _MoodleScreenState extends State<MoodleScreen> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: animation != null
-                ? FadeTransition(opacity: animation, child: webView)
-                : webView,
+            child: HideOnRouteExit(child: webView),
           ),
           if (_isLoading)
             const Positioned(

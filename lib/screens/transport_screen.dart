@@ -15,7 +15,11 @@ import '../utils/formats.dart';
 import '../widgets/expressive.dart';
 
 class TransportScreen extends StatefulWidget {
-  const TransportScreen({super.key, this.service});
+  const TransportScreen({super.key, this.service, this.standalone = false});
+
+  /// True when opened as a page of its own from the menu instead of as a
+  /// tab; departures then refresh for as long as the page is open.
+  final bool standalone;
 
   /// Injectable for tests.
   final TransportService? service;
@@ -80,7 +84,8 @@ class _TransportScreenState extends State<TransportScreen>
     super.dispose();
   }
 
-  bool get _isVisibleTab => AppEvents.currentTab.value == AppTab.transport;
+  bool get _isVisibleTab =>
+      widget.standalone || AppEvents.currentTab.value == AppTab.transport;
 
   bool get _isStale =>
       _lastUpdated == null ||

@@ -6,9 +6,11 @@ import 'package:html/parser.dart' as parser;
 import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart' show WebViewCookieManager;
 
+import '../models/enrolment.dart';
 import '../models/grades.dart';
 import '../models/lecture_details.dart';
 import '../models/person_details.dart';
+import '../models/registered_exam.dart';
 import '../models/timetable_event.dart';
 import '../utils/cookies.dart';
 import '../utils/webview_dark_mode.dart' show mobileUserAgent;
@@ -172,8 +174,9 @@ class AuthService extends ChangeNotifier {
     unawaited(_clearWebViewCookies());
     // The cached timetable is personal data: it must not survive a logout or
     // show up for the next account that signs in on this device.
-    await CacheService.instance
-        .removeWhere((key) => key.startsWith(CacheService.timetablePrefix));
+    await CacheService.instance.removeWhere((key) =>
+        key.startsWith(CacheService.timetablePrefix) ||
+        key.startsWith(CacheService.personalPrefix));
     _isAuthenticated = false;
     _username = null;
     _notify();
@@ -268,6 +271,12 @@ class AuthService extends ChangeNotifier {
 
   Future<List<LsfDocument>> fetchDocuments() =>
       runWithReauth(scraperService.fetchDocuments);
+
+  Future<ExamRegistrations> fetchRegisteredExams() =>
+      runWithReauth(scraperService.fetchRegisteredExams);
+
+  Future<List<Enrolment>> fetchEnrolments() =>
+      runWithReauth(scraperService.fetchEnrolments);
 
   Future<Uint8List> downloadDocument(LsfDocument document) =>
       runWithReauth(() => scraperService.downloadDocument(document));

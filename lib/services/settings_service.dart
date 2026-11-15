@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../navigation/nav_layout.dart';
+
 class SettingsService extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   Locale _locale = Platform.localeName.startsWith('de') ? const Locale('de') : const Locale('en');
@@ -19,7 +21,7 @@ class SettingsService extends ChangeNotifier {
   bool _splashEnabled = true;
   bool _timetableIsWeekView = false;
   bool _hideLabels = false;
-  bool _emailInNavBar = true;
+  NavLayout _navLayout = NavLayout.standard;
 
   bool _isLoaded = false;
 
@@ -49,8 +51,8 @@ class SettingsService extends ChangeNotifier {
   bool get timetableIsWeekView => _timetableIsWeekView;
   bool get hideLabels => _hideLabels;
 
-  /// E-mail as its own tab (true) or as an entry of the menu (false).
-  bool get emailInNavBar => _emailInNavBar;
+  /// What the navigation bar and the menu show, and in which order.
+  NavLayout get navLayout => _navLayout;
   bool get isLoaded => _isLoaded;
 
   SettingsService();
@@ -93,7 +95,18 @@ class SettingsService extends ChangeNotifier {
     _animationsEnabled     = _prefs!.getBool('animationsEnabled')      ?? true;
     _timetableIsWeekView   = _prefs!.getBool('timetableIsWeekView')    ?? false;
     _hideLabels            = _prefs!.getBool('hideLabels')             ?? false;
-    _emailInNavBar = _prefs!.getBool('emailInNavBar') ?? true;
+    final savedBar = _prefs!.getStringList('navBar');
+    if (savedBar != null) {
+      _navLayout = NavLayout.normalized(
+        bar: savedBar,
+        menu: _prefs!.getStringList('navMenu') ?? const [],
+        hidden: _prefs!.getStringList('navHidden') ?? const [],
+      );
+    } else if (_prefs!.getBool('emailInNavBar') ?? false) {
+      // The former single switch: e-mail as a tab between Mensa and
+      // transport.
+      _navLayout = NavLayout.standard.move(NavIds.email, NavSection.bar, 2);
+    }
     final savedOrder    = _prefs!.getStringList('mensaCategoryOrder');
     _mensaCategoryOrder = savedOrder ?? [];
     _mensaDietFilters =
@@ -214,11 +227,14 @@ class SettingsService extends ChangeNotifier {
     await _prefs?.setBool('timetableIsWeekView', isWeekView);
   }
 
-  Future<void> updateEmailInNavBar(bool inNavBar) async {
-    if (inNavBar == _emailInNavBar) return;
-    _emailInNavBar = inNavBar;
+  Future<void> updateNavLayout(NavLayout layout) async {
+    if (layout == _navLayout) return;
+    _navLayout = layout;
     notifyListeners();
-    await _prefs?.setBool('emailInNavBar', inNavBar);
+    await _prefs?.setStringList('navBar', layout.bar);
+    await _prefs?.setStringList('navMenu', layout.menu);
+    await _prefs?.setStringList('navHidden', layout.hidden);
+    await _prefs?.remove('emailInNavBar');
   }
 
   Future<void> updateHideLabels(bool hide) async {

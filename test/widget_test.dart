@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:uniwe/services/cancellation_store.dart';
 import 'package:uniwe/main.dart';
 import 'package:uniwe/models/mensa_meal.dart';
 import 'package:uniwe/models/timetable_event.dart';
@@ -35,6 +36,11 @@ void main() {
             ),
             update: (_, scraper, logger, auth) =>
                 auth ?? AuthService(scraper, logger),
+          ),
+          ChangeNotifierProvider(
+            create: (context) => CancellationStore(
+              fetch: context.read<LsfScraperService>().fetchCancelledLectures,
+            ),
           ),
         ],
         child: const UniweApp(),

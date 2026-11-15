@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Texts of the home screen widgets. Everything else is translated in
+     lib/l10n/app_localizations.dart. -->
+<resources>
+    <string name="widget_next_class_name">Next class</string>
+    <string name="widget_next_class_description">The class that is running or comes next</string>
+    <string name="widget_today_name">Classes</string>
+    <string name="widget_today_description">Your classes of today or the next day</string>
+    <string name="widget_mensa_name">Mensa</string>
+    <string name="widget_mensa_description">The main dishes of the day</string>
+    <string name="widget_semester_name">Semester</string>
+    <string name="widget_semester_description">Semester progress and the next date or exam</string>
+    <string name="widget_today">Today</string>
+    <string name="widget_tomorrow">Tomorrow</string>
+    <string name="widget_today_lower">today</string>
+    <string name="widget_tomorrow_lower">tomorrow</string>
+    <string name="widget_in_days">in %1$d days</string>
+    <string name="widget_until">until %1$s</string>
+    <string name="widget_sign_in">Sign in to Uniwe to see your classes</string>
+    <string name="widget_open_to_update">Open Uniwe to update</string>
+    <string name="widget_no_classes_until">No classes until %1$s</string>
+    <string name="widget_now_until">Now · until %1$s</string>
+    <string name="widget_exam_on">Exam · %1$s</string>
+    <string name="widget_cancelled">Cancelled</string>
+    <string name="widget_cancelled_title">Cancelled: %1$s</string>
+    <string name="widget_more">+%1$d more</string>
+    <string name="widget_no_menu">No menu available</string>
+    <string name="widget_lectures_start">Lectures start %1$s</string>
+    <string name="widget_lectures_over">Lecture-free period</string>
+    <string name="widget_week_of">Week %1$d of %2$d</string>
+    <string name="widget_exam_in">Exam %2$s: %1$s</string>
+</resources>

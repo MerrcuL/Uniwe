@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uniwe/app_events.dart';
+import 'package:uniwe/navigation/nav_layout.dart';
 import 'package:uniwe/screens/about_screen.dart';
 import 'package:uniwe/screens/certificates_screen.dart';
 import 'package:uniwe/screens/grades_screen.dart';
@@ -142,12 +143,17 @@ List<Map<String, Object?>> _weekEvents() {
 
 DateTime get _shownDay => Dates.skipWeekend(Dates.today(), showWeekends: false);
 
-Map<String, Object> _timetableCache() => cacheEntry(
-      CacheService.weekKey(IsoWeek.fromDate(_shownDay).key),
-      _weekEvents(),
-      // Old enough that the store asks LSF again instead of trusting it.
-      at: DateTime.now().subtract(const Duration(hours: 2)),
-    );
+Map<String, Object> _timetableCache() => {
+      // On a weekend the shown week depends on whether weekends are hidden
+      // (the following week) or shown (the running one): cache both.
+      for (final day in {_shownDay, Dates.today()})
+        ...cacheEntry(
+          CacheService.weekKey(IsoWeek.fromDate(day).key),
+          _weekEvents(),
+          // Old enough that the store asks LSF again instead of trusting it.
+          at: DateTime.now().subtract(const Duration(hours: 2)),
+        ),
+    };
 
 MensaService _mensaService() {
   final today = DateTime.now();
@@ -824,6 +830,8 @@ void main() {
       );
 
       // Settings open from the bottom of the menu and return to it.
+      await tester.ensureVisible(find.text('Settings').last);
+      await _settle(tester);
       await tester.tap(find.text('Settings').last);
       await _settle(tester);
       expect(find.byType(SettingsScreen), findsOneWidget);
@@ -831,9 +839,15 @@ void main() {
       await _settle(tester);
       expect(find.byType(SettingsScreen), findsNothing);
 
-      // E-mail can move from the bar into the menu, below LSF.
+      // E-mail lives in the menu (below LSF) by default and can move into
+      // the bar and back.
+      expect(find.byIcon(Icons.email_outlined), findsNothing);
+      final withEmail =
+          NavLayout.standard.move(NavIds.email, NavSection.bar, 2);
+      await app.settings.updateNavLayout(withEmail);
+      await _settle(tester);
       expect(find.byIcon(Icons.email_outlined), findsOneWidget);
-      await app.settings.updateEmailInNavBar(false);
+      await app.settings.updateNavLayout(NavLayout.standard);
       await _settle(tester);
       expect(find.byIcon(Icons.email_outlined), findsNothing);
       expect(find.text('HTW web mail'), findsOneWidget);
@@ -843,11 +857,13 @@ void main() {
       expect(find.text('Webmail'), findsOneWidget); // signed-out prompt
       await tester.tap(find.byIcon(Icons.close_rounded));
       await _settle(tester);
-      await app.settings.updateEmailInNavBar(true);
+      await app.settings.updateNavLayout(withEmail);
       await _settle(tester);
       expect(find.byIcon(Icons.email_outlined), findsOneWidget);
 
       // LSF needs a session: signed out, it asks to sign in first.
+      await tester.ensureVisible(find.text('LSF'));
+      await _settle(tester);
       await tester.tap(find.text('LSF'));
       await _settle(tester);
       expect(find.text('HTW LSF Login'), findsOneWidget);
