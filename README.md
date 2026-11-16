@@ -2,6 +2,7 @@
   <img src="assets/icons/icon_foreground.png" alt="Uniwe Logo" width="150"/>
 
   <h1>Uniwe - HTW Berlin</h1>
+  HTW Berlin App – LSF Alternative / CaMS Alternative / HISinOne
   
   [**🇺🇸 English**](README.md) | [**🇩🇪 Deutsch**](README.de.md)
   
